@@ -46,50 +46,6 @@
 
 namespace Orthanc
 {
-  static OrthancPluginResourceType Convert(ResourceType type)
-  {
-    switch (type)
-    {
-      case ResourceType_Patient:
-        return OrthancPluginResourceType_Patient;
-
-      case ResourceType_Study:
-        return OrthancPluginResourceType_Study;
-
-      case ResourceType_Series:
-        return OrthancPluginResourceType_Series;
-
-      case ResourceType_Instance:
-        return OrthancPluginResourceType_Instance;
-
-      default:
-        throw OrthancException(ErrorCode_InternalError);
-    }
-  }
-
-
-  static ResourceType Convert(OrthancPluginResourceType type)
-  {
-    switch (type)
-    {
-      case OrthancPluginResourceType_Patient:
-        return ResourceType_Patient;
-
-      case OrthancPluginResourceType_Study:
-        return ResourceType_Study;
-
-      case OrthancPluginResourceType_Series:
-        return ResourceType_Series;
-
-      case OrthancPluginResourceType_Instance:
-        return ResourceType_Instance;
-
-      default:
-        throw OrthancException(ErrorCode_InternalError);
-    }
-  }
-
-
   static FileInfo Convert(const OrthancPluginAttachment& attachment)
   {
     return FileInfo(attachment.uuid,
@@ -99,6 +55,16 @@ namespace Orthanc
                     static_cast<CompressionType>(attachment.compressionType),
                     attachment.compressedSize,
                     attachment.compressedHash);
+  }
+
+
+  void OrthancPluginDatabase::CheckSuccess(OrthancPluginErrorCode code)
+  {
+    if (code != OrthancPluginErrorCode_Success)
+    {
+      errorDictionary_.LogError(code, true);
+      throw OrthancException(static_cast<ErrorCode>(code));
+    }
   }
 
 
@@ -194,11 +160,13 @@ namespace Orthanc
 
 
   OrthancPluginDatabase::OrthancPluginDatabase(SharedLibrary& library,
+                                               PluginsErrorDictionary&  errorDictionary,
                                                const OrthancPluginDatabaseBackend& backend,
                                                const OrthancPluginDatabaseExtensions* extensions,
                                                size_t extensionsSize,
                                                void *payload) : 
     library_(library),
+    errorDictionary_(errorDictionary),
     type_(_OrthancPluginDatabaseAnswerType_None),
     backend_(backend),
     payload_(payload),
@@ -232,46 +200,26 @@ namespace Orthanc
     tmp.compressedSize = attachment.GetCompressedSize();
     tmp.compressedHash = attachment.GetCompressedMD5().c_str();
 
-    OrthancPluginErrorCode error = backend_.addAttachment(payload_, id, &tmp);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.addAttachment(payload_, id, &tmp));
   }
 
 
   void OrthancPluginDatabase::AttachChild(int64_t parent,
                                           int64_t child)
   {
-    OrthancPluginErrorCode error = backend_.attachChild(payload_, parent, child);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.attachChild(payload_, parent, child));
   }
 
 
   void OrthancPluginDatabase::ClearChanges()
   {
-    OrthancPluginErrorCode error = backend_.clearChanges(payload_);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.clearChanges(payload_));
   }
 
 
   void OrthancPluginDatabase::ClearExportedResources()
   {
-    OrthancPluginErrorCode error = backend_.clearExportedResources(payload_);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.clearExportedResources(payload_));
   }
 
 
@@ -279,14 +227,7 @@ namespace Orthanc
                                                 ResourceType type)
   {
     int64_t id;
-
-    OrthancPluginErrorCode error = backend_.createResource(&id, payload_, publicId.c_str(), Convert(type));
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.createResource(&id, payload_, publicId.c_str(), Plugins::Convert(type)));
     return id;
   }
 
@@ -294,35 +235,20 @@ namespace Orthanc
   void OrthancPluginDatabase::DeleteAttachment(int64_t id,
                                                FileContentType attachment)
   {
-    OrthancPluginErrorCode error = backend_.deleteAttachment(payload_, id, static_cast<int32_t>(attachment));
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.deleteAttachment(payload_, id, static_cast<int32_t>(attachment)));
   }
 
 
   void OrthancPluginDatabase::DeleteMetadata(int64_t id,
                                              MetadataType type)
   {
-    OrthancPluginErrorCode error = backend_.deleteMetadata(payload_, id, static_cast<int32_t>(type));
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.deleteMetadata(payload_, id, static_cast<int32_t>(type)));
   }
 
 
   void OrthancPluginDatabase::DeleteResource(int64_t id)
   {
-    OrthancPluginErrorCode error = backend_.deleteResource(payload_, id);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.deleteResource(payload_, id));
   }
 
 
@@ -348,18 +274,26 @@ namespace Orthanc
   }
 
 
+  void OrthancPluginDatabase::GetAllInternalIds(std::list<int64_t>& target,
+                                                ResourceType resourceType)
+  {
+    if (extensions_.getAllInternalIds == NULL)
+    {
+      LOG(ERROR) << "The database plugin does not implement the GetAllInternalIds primitive";
+      throw OrthancException(ErrorCode_DatabasePlugin);
+    }
+
+    ResetAnswers();
+    CheckSuccess(extensions_.getAllInternalIds(GetContext(), payload_, Plugins::Convert(resourceType)));
+    ForwardAnswers(target);
+  }
+
+
   void OrthancPluginDatabase::GetAllPublicIds(std::list<std::string>& target,
                                               ResourceType resourceType)
   {
     ResetAnswers();
-
-    OrthancPluginErrorCode error = backend_.getAllPublicIds(GetContext(), payload_, Convert(resourceType));
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.getAllPublicIds(GetContext(), payload_, Plugins::Convert(resourceType)));
     ForwardAnswers(target);
   }
 
@@ -373,15 +307,8 @@ namespace Orthanc
     {
       // This extension is available since Orthanc 0.9.4
       ResetAnswers();
-
-      OrthancPluginErrorCode error = extensions_.getAllPublicIdsWithLimit
-        (GetContext(), payload_, Convert(resourceType), since, limit);
-
-      if (error != OrthancPluginErrorCode_Success)
-      {
-        throw OrthancException(Plugins::Convert(error));
-      }
-
+      CheckSuccess(extensions_.getAllPublicIdsWithLimit
+                   (GetContext(), payload_, Plugins::Convert(resourceType), since, limit));
       ForwardAnswers(target);
     }
     else
@@ -428,12 +355,7 @@ namespace Orthanc
     answerDone_ = &done;
     done = false;
 
-    OrthancPluginErrorCode error = backend_.getChanges(GetContext(), payload_, since, maxResults);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.getChanges(GetContext(), payload_, since, maxResults));
   }
 
 
@@ -441,14 +363,7 @@ namespace Orthanc
                                                     int64_t id)
   {
     ResetAnswers();
-
-    OrthancPluginErrorCode error = backend_.getChildrenInternalId(GetContext(), payload_, id);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.getChildrenInternalId(GetContext(), payload_, id));
     ForwardAnswers(target);
   }
 
@@ -457,14 +372,7 @@ namespace Orthanc
                                                   int64_t id)
   {
     ResetAnswers();
-
-    OrthancPluginErrorCode error = backend_.getChildrenPublicId(GetContext(), payload_, id);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.getChildrenPublicId(GetContext(), payload_, id));
     ForwardAnswers(target);
   }
 
@@ -479,12 +387,7 @@ namespace Orthanc
     answerDone_ = &done;
     done = false;
 
-    OrthancPluginErrorCode error = backend_.getExportedResources(GetContext(), payload_, since, maxResults);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.getExportedResources(GetContext(), payload_, since, maxResults));
   }
 
 
@@ -496,12 +399,7 @@ namespace Orthanc
     answerChanges_ = &target;
     answerDone_ = &ignored;
 
-    OrthancPluginErrorCode error = backend_.getLastChange(GetContext(), payload_);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.getLastChange(GetContext(), payload_));
   }
 
 
@@ -513,12 +411,7 @@ namespace Orthanc
     answerExportedResources_ = &target;
     answerDone_ = &ignored;
 
-    OrthancPluginErrorCode error = backend_.getLastExportedResource(GetContext(), payload_);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.getLastExportedResource(GetContext(), payload_));
   }
 
 
@@ -528,12 +421,7 @@ namespace Orthanc
     ResetAnswers();
     answerDicomMap_ = &map;
 
-    OrthancPluginErrorCode error = backend_.getMainDicomTags(GetContext(), payload_, id);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.getMainDicomTags(GetContext(), payload_, id));
   }
 
 
@@ -542,13 +430,8 @@ namespace Orthanc
     ResetAnswers();
     std::string s;
 
-    OrthancPluginErrorCode error = backend_.getPublicId(GetContext(), payload_, resourceId);
+    CheckSuccess(backend_.getPublicId(GetContext(), payload_, resourceId));
 
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-    
     if (!ForwardSingleAnswer(s))
     {
       throw OrthancException(ErrorCode_DatabasePlugin);
@@ -561,14 +444,7 @@ namespace Orthanc
   uint64_t OrthancPluginDatabase::GetResourceCount(ResourceType resourceType)
   {
     uint64_t count;
-
-    OrthancPluginErrorCode error = backend_.getResourceCount(&count, payload_, Convert(resourceType));
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.getResourceCount(&count, payload_, Plugins::Convert(resourceType)));
     return count;
   }
 
@@ -576,29 +452,15 @@ namespace Orthanc
   ResourceType OrthancPluginDatabase::GetResourceType(int64_t resourceId)
   {
     OrthancPluginResourceType type;
-
-    OrthancPluginErrorCode error = backend_.getResourceType(&type, payload_, resourceId);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
-    return Convert(type);
+    CheckSuccess(backend_.getResourceType(&type, payload_, resourceId));
+    return Plugins::Convert(type);
   }
 
 
   uint64_t OrthancPluginDatabase::GetTotalCompressedSize()
   {
     uint64_t size;
-
-    OrthancPluginErrorCode error = backend_.getTotalCompressedSize(&size, payload_);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.getTotalCompressedSize(&size, payload_));
     return size;
   }
 
@@ -606,14 +468,7 @@ namespace Orthanc
   uint64_t OrthancPluginDatabase::GetTotalUncompressedSize()
   {
     uint64_t size;
-
-    OrthancPluginErrorCode error = backend_.getTotalUncompressedSize(&size, payload_);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.getTotalUncompressedSize(&size, payload_));
     return size;
   }
 
@@ -621,14 +476,7 @@ namespace Orthanc
   bool OrthancPluginDatabase::IsExistingResource(int64_t internalId)
   {
     int32_t existing;
-
-    OrthancPluginErrorCode error = backend_.isExistingResource(&existing, payload_, internalId);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.isExistingResource(&existing, payload_, internalId));
     return (existing != 0);
   }
 
@@ -636,14 +484,7 @@ namespace Orthanc
   bool OrthancPluginDatabase::IsProtectedPatient(int64_t internalId)
   {
     int32_t isProtected;
-
-    OrthancPluginErrorCode error = backend_.isProtectedPatient(&isProtected, payload_, internalId);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.isProtectedPatient(&isProtected, payload_, internalId));
     return (isProtected != 0);
   }
 
@@ -652,13 +493,7 @@ namespace Orthanc
                                                     int64_t id)
   {
     ResetAnswers();
-
-    OrthancPluginErrorCode error = backend_.listAvailableMetadata(GetContext(), payload_, id);
- 
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.listAvailableMetadata(GetContext(), payload_, id));
 
     if (type_ != _OrthancPluginDatabaseAnswerType_None &&
         type_ != _OrthancPluginDatabaseAnswerType_Int32)
@@ -684,12 +519,7 @@ namespace Orthanc
   {
     ResetAnswers();
 
-    OrthancPluginErrorCode error = backend_.listAvailableAttachments(GetContext(), payload_, id);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.listAvailableAttachments(GetContext(), payload_, id));
 
     if (type_ != _OrthancPluginDatabaseAnswerType_None &&
         type_ != _OrthancPluginDatabaseAnswerType_Int32)
@@ -716,16 +546,11 @@ namespace Orthanc
     OrthancPluginChange tmp;
     tmp.seq = change.GetSeq();
     tmp.changeType = static_cast<int32_t>(change.GetChangeType());
-    tmp.resourceType = Convert(change.GetResourceType());
+    tmp.resourceType = Plugins::Convert(change.GetResourceType());
     tmp.publicId = change.GetPublicId().c_str();
     tmp.date = change.GetDate().c_str();
 
-    OrthancPluginErrorCode error = backend_.logChange(payload_, &tmp);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.logChange(payload_, &tmp));
   }
 
 
@@ -733,7 +558,7 @@ namespace Orthanc
   {
     OrthancPluginExportedResource tmp;
     tmp.seq = resource.GetSeq();
-    tmp.resourceType = Convert(resource.GetResourceType());
+    tmp.resourceType = Plugins::Convert(resource.GetResourceType());
     tmp.publicId = resource.GetPublicId().c_str();
     tmp.modality = resource.GetModality().c_str();
     tmp.date = resource.GetDate().c_str();
@@ -742,12 +567,7 @@ namespace Orthanc
     tmp.seriesInstanceUid = resource.GetSeriesInstanceUid().c_str();
     tmp.sopInstanceUid = resource.GetSopInstanceUid().c_str();
 
-    OrthancPluginErrorCode error = backend_.logExportedResource(payload_, &tmp);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.logExportedResource(payload_, &tmp));
   }
 
     
@@ -757,13 +577,8 @@ namespace Orthanc
   {
     ResetAnswers();
 
-    OrthancPluginErrorCode error = backend_.lookupAttachment
-      (GetContext(), payload_, id, static_cast<int32_t>(contentType));
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.lookupAttachment
+                 (GetContext(), payload_, id, static_cast<int32_t>(contentType)));
 
     if (type_ == _OrthancPluginDatabaseAnswerType_None)
     {
@@ -787,53 +602,34 @@ namespace Orthanc
   {
     ResetAnswers();
 
-    OrthancPluginErrorCode error = backend_.lookupGlobalProperty
-      (GetContext(), payload_, static_cast<int32_t>(property));
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.lookupGlobalProperty
+                 (GetContext(), payload_, static_cast<int32_t>(property)));
 
     return ForwardSingleAnswer(target);
   }
 
 
-  void OrthancPluginDatabase::LookupIdentifier(std::list<int64_t>& target,
+  void OrthancPluginDatabase::LookupIdentifier(std::list<int64_t>& result,
+                                               ResourceType level,
                                                const DicomTag& tag,
+                                               IdentifierConstraintType type,
                                                const std::string& value)
   {
-    ResetAnswers();
+    if (extensions_.lookupIdentifier3 == NULL)
+    {
+      LOG(ERROR) << "The database plugin does not implement the LookupIdentifier3 primitive";
+      throw OrthancException(ErrorCode_DatabasePlugin);
+    }
 
     OrthancPluginDicomTag tmp;
     tmp.group = tag.GetGroup();
     tmp.element = tag.GetElement();
     tmp.value = value.c_str();
 
-    OrthancPluginErrorCode error = backend_.lookupIdentifier(GetContext(), payload_, &tmp);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
-    ForwardAnswers(target);
-  }
-
-
-  void OrthancPluginDatabase::LookupIdentifier(std::list<int64_t>& target,
-                                               const std::string& value)
-  {
     ResetAnswers();
-
-    OrthancPluginErrorCode error = backend_.lookupIdentifier2(GetContext(), payload_, value.c_str());
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
-    ForwardAnswers(target);
+    CheckSuccess(extensions_.lookupIdentifier3(GetContext(), payload_, Plugins::Convert(level),
+                                               &tmp, Plugins::Convert(type)));
+    ForwardAnswers(result);
   }
 
 
@@ -842,14 +638,7 @@ namespace Orthanc
                                              MetadataType type)
   {
     ResetAnswers();
-
-    OrthancPluginErrorCode error = backend_.lookupMetadata(GetContext(), payload_, id, static_cast<int32_t>(type));
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.lookupMetadata(GetContext(), payload_, id, static_cast<int32_t>(type)));
     return ForwardSingleAnswer(target);
   }
 
@@ -858,14 +647,7 @@ namespace Orthanc
                                            int64_t resourceId)
   {
     ResetAnswers();
-
-    OrthancPluginErrorCode error = backend_.lookupParent(GetContext(), payload_, resourceId);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.lookupParent(GetContext(), payload_, resourceId));
     return ForwardSingleAnswer(parentId);
   }
 
@@ -876,12 +658,7 @@ namespace Orthanc
   {
     ResetAnswers();
 
-    OrthancPluginErrorCode error = backend_.lookupResource(GetContext(), payload_, publicId.c_str());
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.lookupResource(GetContext(), payload_, publicId.c_str()));
 
     if (type_ == _OrthancPluginDatabaseAnswerType_None)
     {
@@ -904,14 +681,7 @@ namespace Orthanc
   bool OrthancPluginDatabase::SelectPatientToRecycle(int64_t& internalId)
   {
     ResetAnswers();
-
-    OrthancPluginErrorCode error = backend_.selectPatientToRecycle(GetContext(), payload_);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.selectPatientToRecycle(GetContext(), payload_));
     return ForwardSingleAnswer(internalId);
   }
 
@@ -920,14 +690,7 @@ namespace Orthanc
                                                      int64_t patientIdToAvoid)
   {
     ResetAnswers();
-
-    OrthancPluginErrorCode error = backend_.selectPatientToRecycle2(GetContext(), payload_, patientIdToAvoid);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
-
+    CheckSuccess(backend_.selectPatientToRecycle2(GetContext(), payload_, patientIdToAvoid));
     return ForwardSingleAnswer(internalId);
   }
 
@@ -935,13 +698,20 @@ namespace Orthanc
   void OrthancPluginDatabase::SetGlobalProperty(GlobalProperty property,
                                                 const std::string& value)
   {
-    OrthancPluginErrorCode error = backend_.setGlobalProperty
-      (payload_, static_cast<int32_t>(property), value.c_str());
+    CheckSuccess(backend_.setGlobalProperty
+                 (payload_, static_cast<int32_t>(property), value.c_str()));
+  }
 
-    if (error != OrthancPluginErrorCode_Success)
+
+  void OrthancPluginDatabase::ClearMainDicomTags(int64_t id)
+  {
+    if (extensions_.clearMainDicomTags == NULL)
     {
-      throw OrthancException(Plugins::Convert(error));
+      LOG(ERROR) << "Your custom index plugin does not implement the ClearMainDicomTags() extension";
+      throw OrthancException(ErrorCode_DatabasePlugin);
     }
+
+    CheckSuccess(extensions_.clearMainDicomTags(payload_, id));
   }
 
 
@@ -954,21 +724,20 @@ namespace Orthanc
     tmp.element = tag.GetElement();
     tmp.value = value.c_str();
 
-    OrthancPluginErrorCode error;
+    CheckSuccess(backend_.setMainDicomTag(payload_, id, &tmp));
+  }
 
-    if (tag.IsIdentifier())
-    {
-      error = backend_.setIdentifierTag(payload_, id, &tmp);
-    }
-    else
-    {
-      error = backend_.setMainDicomTag(payload_, id, &tmp);
-    }
 
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+  void OrthancPluginDatabase::SetIdentifierTag(int64_t id,
+                                               const DicomTag& tag,
+                                               const std::string& value)
+  {
+    OrthancPluginDicomTag tmp;
+    tmp.group = tag.GetGroup();
+    tmp.element = tag.GetElement();
+    tmp.value = value.c_str();
+
+    CheckSuccess(backend_.setIdentifierTag(payload_, id, &tmp));
   }
 
 
@@ -976,25 +745,15 @@ namespace Orthanc
                                           MetadataType type,
                                           const std::string& value)
   {
-    OrthancPluginErrorCode error = backend_.setMetadata
-      (payload_, id, static_cast<int32_t>(type), value.c_str());
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.setMetadata
+                 (payload_, id, static_cast<int32_t>(type), value.c_str()));
   }
 
 
   void OrthancPluginDatabase::SetProtectedPatient(int64_t internalId, 
                                                   bool isProtected)
   {
-    OrthancPluginErrorCode error = backend_.setProtectedPatient(payload_, internalId, isProtected);
-
-    if (error != OrthancPluginErrorCode_Success)
-    {
-      throw OrthancException(Plugins::Convert(error));
-    }
+    CheckSuccess(backend_.setProtectedPatient(payload_, internalId, isProtected));
   }
 
 
@@ -1003,50 +762,47 @@ namespace Orthanc
   private:
     const OrthancPluginDatabaseBackend& backend_;
     void* payload_;
+    PluginsErrorDictionary&  errorDictionary_;
+
+    void CheckSuccess(OrthancPluginErrorCode code)
+    {
+      if (code != OrthancPluginErrorCode_Success)
+      {
+        errorDictionary_.LogError(code, true);
+        throw OrthancException(static_cast<ErrorCode>(code));
+      }
+    }
 
   public:
     Transaction(const OrthancPluginDatabaseBackend& backend,
-                void* payload) :
+                void* payload,
+                PluginsErrorDictionary&  errorDictionary) :
       backend_(backend),
-      payload_(payload)
+      payload_(payload),
+      errorDictionary_(errorDictionary)
     {
     }
 
     virtual void Begin()
     {
-      OrthancPluginErrorCode error = backend_.startTransaction(payload_);
-
-      if (error != OrthancPluginErrorCode_Success)
-      {
-        throw OrthancException(Plugins::Convert(error));
-      }
+      CheckSuccess(backend_.startTransaction(payload_));
     }
 
     virtual void Rollback()
     {
-      OrthancPluginErrorCode error = backend_.rollbackTransaction(payload_);
-
-      if (error != OrthancPluginErrorCode_Success)
-      {
-        throw OrthancException(Plugins::Convert(error));
-      }
+      CheckSuccess(backend_.rollbackTransaction(payload_));
     }
 
     virtual void Commit()
     {
-      OrthancPluginErrorCode error = backend_.commitTransaction(payload_);
-
-      if (error != OrthancPluginErrorCode_Success)
-      {
-        throw OrthancException(Plugins::Convert(error));
-      }
+      CheckSuccess(backend_.commitTransaction(payload_));
     }
   };
 
 
   SQLite::ITransaction* OrthancPluginDatabase::StartTransaction()
   {
-    return new Transaction(backend_, payload_);
+    return new Transaction(backend_, payload_, errorDictionary_);
   }
 
 
@@ -1065,14 +821,14 @@ namespace Orthanc
         
       case _OrthancPluginDatabaseAnswerType_RemainingAncestor:
       {
-        ResourceType type = Convert(static_cast<OrthancPluginResourceType>(answer.valueInt32));
+        ResourceType type = Plugins::Convert(static_cast<OrthancPluginResourceType>(answer.valueInt32));
         listener.SignalRemainingAncestor(type, answer.valueString);
         break;
       }
       
       case _OrthancPluginDatabaseAnswerType_DeletedResource:
       {
-        ResourceType type = Convert(static_cast<OrthancPluginResourceType>(answer.valueInt32));
+        ResourceType type = Plugins::Convert(static_cast<OrthancPluginResourceType>(answer.valueInt32));
         ServerIndexChange change(ChangeType_Deleted, type, answer.valueString);
         listener.SignalChange(change);
         break;
@@ -1089,13 +845,7 @@ namespace Orthanc
     if (extensions_.getDatabaseVersion != NULL)
     {
       uint32_t version;
-      OrthancPluginErrorCode error = extensions_.getDatabaseVersion(&version, payload_);
-
-      if (error != OrthancPluginErrorCode_Success)
-      {
-        throw OrthancException(Plugins::Convert(error));
-      }
-
+      CheckSuccess(extensions_.getDatabaseVersion(&version, payload_));
       return version;
     }
     else
@@ -1113,13 +863,22 @@ namespace Orthanc
   {
     if (extensions_.upgradeDatabase != NULL)
     {
-      OrthancPluginErrorCode error = extensions_.upgradeDatabase(
+      Transaction transaction(backend_, payload_, errorDictionary_);
+      transaction.Begin();
+
+      OrthancPluginErrorCode code = extensions_.upgradeDatabase(
         payload_, targetVersion, 
         reinterpret_cast<OrthancPluginStorageArea*>(&storageArea));
 
-      if (error != OrthancPluginErrorCode_Success)
+      if (code == OrthancPluginErrorCode_Success)
       {
-        throw OrthancException(Plugins::Convert(error));
+        transaction.Commit();
+      }
+      else
+      {
+        transaction.Rollback();
+        errorDictionary_.LogError(code, true);
+        throw OrthancException(static_cast<ErrorCode>(code));
       }
     }
   }
@@ -1210,7 +969,7 @@ namespace Orthanc
       case _OrthancPluginDatabaseAnswerType_Resource:
       {
         OrthancPluginResourceType type = static_cast<OrthancPluginResourceType>(answer.valueInt32);
-        answerResources_.push_back(std::make_pair(answer.valueInt64, Convert(type)));
+        answerResources_.push_back(std::make_pair(answer.valueInt64, Plugins::Convert(type)));
         break;
       }
 
@@ -1270,7 +1029,7 @@ namespace Orthanc
           answerChanges_->push_back
             (ServerIndexChange(change.seq,
                                static_cast<ChangeType>(change.changeType),
-                               Convert(change.resourceType),
+                               Plugins::Convert(change.resourceType),
                                change.publicId,
                                change.date));                                   
         }
@@ -1296,7 +1055,7 @@ namespace Orthanc
           assert(answerExportedResources_ != NULL);
           answerExportedResources_->push_back
             (ExportedResource(exported.seq,
-                              Convert(exported.resourceType),
+                              Plugins::Convert(exported.resourceType),
                               exported.publicId,
                               exported.modality,
                               exported.date,

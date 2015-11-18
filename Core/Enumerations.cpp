@@ -142,6 +142,18 @@ namespace Orthanc
       case ErrorCode_BadFont:
         return "Badly formatted font file";
 
+      case ErrorCode_DatabasePlugin:
+        return "The plugin implementing a custom database back-end does not fulfill the proper interface";
+
+      case ErrorCode_StorageAreaPlugin:
+        return "Error in the plugin implementing a custom storage area";
+
+      case ErrorCode_EmptyRequest:
+        return "The request is empty";
+
+      case ErrorCode_NotAcceptable:
+        return "Cannot send a response which is acceptable according to the Accept HTTP header";
+
       case ErrorCode_SQLiteNotOpened:
         return "SQLite: The database is not opened";
 
@@ -304,11 +316,24 @@ namespace Orthanc
       case ErrorCode_DatabaseBackendAlreadyRegistered:
         return "Another plugin has already registered a custom database back-end";
 
-      case ErrorCode_DatabasePlugin:
-        return "The plugin implementing a custom database back-end does not fulfill the proper interface";
+      case ErrorCode_DatabaseNotInitialized:
+        return "Plugin trying to call the database during its initialization";
+
+      case ErrorCode_SslDisabled:
+        return "Orthanc has been built without SSL support";
+
+      case ErrorCode_CannotOrderSlices:
+        return "Unable to order the slices of the series";
 
       default:
-        return "Unknown error code";
+        if (error >= ErrorCode_START_PLUGINS)
+        {
+          return "Error encountered within some plugin";
+        }
+        else
+        {
+          return "Unknown error code";
+        }
     }
   }
 
@@ -958,39 +983,6 @@ namespace Orthanc
   }
 
 
-  const char* GetMimeType(FileContentType type)
-  {
-    switch (type)
-    {
-      case FileContentType_Dicom:
-        return "application/dicom";
-
-      case FileContentType_DicomAsJson:
-        return "application/json";
-
-      default:
-        return "application/octet-stream";
-    }
-  }
-
-
-  const char* GetFileExtension(FileContentType type)
-  {
-    switch (type)
-    {
-      case FileContentType_Dicom:
-        return ".dcm";
-
-      case FileContentType_DicomAsJson:
-        return ".json";
-
-      default:
-        // Unknown file type
-        return "";
-    }
-  }
-
-
   ResourceType GetChildResourceType(ResourceType type)
   {
     switch (type)
@@ -1142,8 +1134,18 @@ namespace Orthanc
       case ErrorCode_Unauthorized:
         return HttpStatus_401_Unauthorized;
 
+      case ErrorCode_NotAcceptable:
+        return HttpStatus_406_NotAcceptable;
+
       default:
         return HttpStatus_500_InternalServerError;
     }
+  }
+
+
+  bool IsUserContentType(FileContentType type)
+  {
+    return (type >= FileContentType_StartUser &&
+            type <= FileContentType_EndUser);
   }
 }

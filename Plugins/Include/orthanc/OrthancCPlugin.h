@@ -210,6 +210,10 @@ extern "C"
     OrthancPluginErrorCode_BadJson = 28    /*!< Cannot parse a JSON document */,
     OrthancPluginErrorCode_Unauthorized = 29    /*!< Bad credentials were provided to an HTTP request */,
     OrthancPluginErrorCode_BadFont = 30    /*!< Badly formatted font file */,
+    OrthancPluginErrorCode_DatabasePlugin = 31    /*!< The plugin implementing a custom database back-end does not fulfill the proper interface */,
+    OrthancPluginErrorCode_StorageAreaPlugin = 32    /*!< Error in the plugin implementing a custom storage area */,
+    OrthancPluginErrorCode_EmptyRequest = 33    /*!< The request is empty */,
+    OrthancPluginErrorCode_NotAcceptable = 34    /*!< Cannot send a response which is acceptable according to the Accept HTTP header */,
     OrthancPluginErrorCode_SQLiteNotOpened = 1000    /*!< SQLite: The database is not opened */,
     OrthancPluginErrorCode_SQLiteAlreadyOpened = 1001    /*!< SQLite: Connection is already open */,
     OrthancPluginErrorCode_SQLiteCannotOpen = 1002    /*!< SQLite: Unable to open the database */,
@@ -264,7 +268,9 @@ extern "C"
     OrthancPluginErrorCode_LuaReturnsNoString = 2035    /*!< The Lua function does not return a string */,
     OrthancPluginErrorCode_StorageAreaAlreadyRegistered = 2036    /*!< Another plugin has already registered a custom storage area */,
     OrthancPluginErrorCode_DatabaseBackendAlreadyRegistered = 2037    /*!< Another plugin has already registered a custom database back-end */,
-    OrthancPluginErrorCode_DatabasePlugin = 2038    /*!< The plugin implementing a custom database back-end does not fulfill the proper interface */,
+    OrthancPluginErrorCode_DatabaseNotInitialized = 2038    /*!< Plugin trying to call the database during its initialization */,
+    OrthancPluginErrorCode_SslDisabled = 2039    /*!< Orthanc has been built without SSL support */,
+    OrthancPluginErrorCode_CannotOrderSlices = 2040    /*!< Unable to order the slices of the series */,
 
     _OrthancPluginErrorCode_INTERNAL = 0x7fffffff
   } OrthancPluginErrorCode;
@@ -381,6 +387,10 @@ extern "C"
     _OrthancPluginService_WriteFile = 16,
     _OrthancPluginService_GetErrorDescription = 17,
     _OrthancPluginService_CallHttpClient = 18,
+    _OrthancPluginService_RegisterErrorCode = 19,
+    _OrthancPluginService_RegisterDictionaryTag = 20,
+    _OrthancPluginService_DicomBufferToJson = 21,
+    _OrthancPluginService_DicomInstanceToJson = 22,
 
     /* Registration of callbacks */
     _OrthancPluginService_RegisterRestCallback = 1000,
@@ -418,6 +428,8 @@ extern "C"
     _OrthancPluginService_RestApiPostAfterPlugins = 3011,
     _OrthancPluginService_RestApiDeleteAfterPlugins = 3012,
     _OrthancPluginService_RestApiPutAfterPlugins = 3013,
+    _OrthancPluginService_ReconstructMainDicomTags = 3014,
+    _OrthancPluginService_RestApiGet2 = 3015,
 
     /* Access to DICOM instances */
     _OrthancPluginService_GetInstanceRemoteAet = 4000,
@@ -541,6 +553,7 @@ extern "C"
     OrthancPluginResourceType_Study = 1,       /*!< Study */
     OrthancPluginResourceType_Series = 2,      /*!< Series */
     OrthancPluginResourceType_Instance = 3,    /*!< Instance */
+    OrthancPluginResourceType_None = 4,        /*!< Unavailable resource type */
 
     _OrthancPluginResourceType_INTERNAL = 0x7fffffff
   } OrthancPluginResourceType;
@@ -563,6 +576,10 @@ extern "C"
     OrthancPluginChangeType_StablePatient = 7,      /*!< Timeout: No new instance in this patient */
     OrthancPluginChangeType_StableSeries = 8,       /*!< Timeout: No new instance in this series */
     OrthancPluginChangeType_StableStudy = 9,        /*!< Timeout: No new instance in this study */
+    OrthancPluginChangeType_OrthancStarted = 10,    /*!< Orthanc has started */
+    OrthancPluginChangeType_OrthancStopped = 11,    /*!< Orthanc is stopping */
+    OrthancPluginChangeType_UpdatedAttachment = 12, /*!< Some user-defined attachment has changed for this resource */
+    OrthancPluginChangeType_UpdatedMetadata = 13,   /*!< Some user-defined metadata has changed for this resource */
 
     _OrthancPluginChangeType_INTERNAL = 0x7fffffff
   } OrthancPluginChangeType;
@@ -594,6 +611,91 @@ extern "C"
 
     _OrthancPluginImageFormat_INTERNAL = 0x7fffffff
   } OrthancPluginImageFormat;
+
+
+  /**
+   * The value representations present in the DICOM standard (version 2013).
+   * @ingroup Toolbox
+   **/
+  typedef enum
+  {
+    OrthancPluginValueRepresentation_AE = 1,   /*!< Application Entity */
+    OrthancPluginValueRepresentation_AS = 2,   /*!< Age String */
+    OrthancPluginValueRepresentation_AT = 3,   /*!< Attribute Tag */
+    OrthancPluginValueRepresentation_CS = 4,   /*!< Code String */
+    OrthancPluginValueRepresentation_DA = 5,   /*!< Date */
+    OrthancPluginValueRepresentation_DS = 6,   /*!< Decimal String */
+    OrthancPluginValueRepresentation_DT = 7,   /*!< Date Time */
+    OrthancPluginValueRepresentation_FD = 8,   /*!< Floating Point Double */
+    OrthancPluginValueRepresentation_FL = 9,   /*!< Floating Point Single */
+    OrthancPluginValueRepresentation_IS = 10,  /*!< Integer String */
+    OrthancPluginValueRepresentation_LO = 11,  /*!< Long String */
+    OrthancPluginValueRepresentation_LT = 12,  /*!< Long Text */
+    OrthancPluginValueRepresentation_OB = 13,  /*!< Other Byte String */
+    OrthancPluginValueRepresentation_OF = 14,  /*!< Other Float String */
+    OrthancPluginValueRepresentation_OW = 15,  /*!< Other Word String */
+    OrthancPluginValueRepresentation_PN = 16,  /*!< Person Name */
+    OrthancPluginValueRepresentation_SH = 17,  /*!< Short String */
+    OrthancPluginValueRepresentation_SL = 18,  /*!< Signed Long */
+    OrthancPluginValueRepresentation_SQ = 19,  /*!< Sequence of Items */
+    OrthancPluginValueRepresentation_SS = 20,  /*!< Signed Short */
+    OrthancPluginValueRepresentation_ST = 21,  /*!< Short Text */
+    OrthancPluginValueRepresentation_TM = 22,  /*!< Time */
+    OrthancPluginValueRepresentation_UI = 23,  /*!< Unique Identifier (UID) */
+    OrthancPluginValueRepresentation_UL = 24,  /*!< Unsigned Long */
+    OrthancPluginValueRepresentation_UN = 25,  /*!< Unknown */
+    OrthancPluginValueRepresentation_US = 26,  /*!< Unsigned Short */
+    OrthancPluginValueRepresentation_UT = 27,  /*!< Unlimited Text */
+
+    _OrthancPluginValueRepresentation_INTERNAL = 0x7fffffff
+  } OrthancPluginValueRepresentation;
+
+
+  /**
+   * The possible output formats for a DICOM-to-JSON conversion.
+   * @ingroup Toolbox
+   **/
+  typedef enum
+  {
+    OrthancPluginDicomToJsonFormat_Full = 1,    /*!< Full output, with most details */
+    OrthancPluginDicomToJsonFormat_Short = 2,   /*!< Tags output as hexadecimal numbers */
+    OrthancPluginDicomToJsonFormat_Simple = 3,  /*!< Human-readable JSON */
+
+    _OrthancPluginDicomToJsonFormat_INTERNAL = 0x7fffffff
+  } OrthancPluginDicomToJsonFormat;
+
+
+  /**
+   * Flags to customize a DICOM-to-JSON conversion. By default, binary
+   * tags are formatted using Data URI scheme.
+   * @ingroup Toolbox
+   **/
+  typedef enum
+  {
+    OrthancPluginDicomToJsonFlags_IncludeBinary         = (1 << 0),  /*!< Include the binary tags */
+    OrthancPluginDicomToJsonFlags_IncludePrivateTags    = (1 << 1),  /*!< Include the private tags */
+    OrthancPluginDicomToJsonFlags_IncludeUnknownTags    = (1 << 2),  /*!< Include the tags unknown by the dictionary */
+    OrthancPluginDicomToJsonFlags_IncludePixelData      = (1 << 3),  /*!< Include the pixel data */
+    OrthancPluginDicomToJsonFlags_ConvertBinaryToAscii  = (1 << 4),  /*!< Output binary tags as-is, dropping non-ASCII */
+    OrthancPluginDicomToJsonFlags_ConvertBinaryToNull   = (1 << 5),  /*!< Signal binary tags as null values */
+
+    _OrthancPluginDicomToJsonFlags_INTERNAL = 0x7fffffff
+  } OrthancPluginDicomToJsonFlags;
+
+
+  /**
+   * The constraints on the DICOM identifiers that must be supported
+   * by the database plugins.
+   **/
+  typedef enum
+  {
+    OrthancPluginIdentifierConstraint_Equal,           /*!< Equal */
+    OrthancPluginIdentifierConstraint_SmallerOrEqual,  /*!< Less or equal */
+    OrthancPluginIdentifierConstraint_GreaterOrEqual,  /*!< More or equal */
+    OrthancPluginIdentifierConstraint_Wildcard,        /*!< Case-sensitive wildcard matching (with * and ?) */
+
+    _OrthancPluginIdentifierConstraint_INTERNAL = 0x7fffffff
+  } OrthancPluginIdentifierConstraint;
 
 
 
@@ -807,7 +909,11 @@ extern "C"
         sizeof(int32_t) != sizeof(OrthancPluginResourceType) ||
         sizeof(int32_t) != sizeof(OrthancPluginChangeType) ||
         sizeof(int32_t) != sizeof(OrthancPluginCompressionType) ||
-        sizeof(int32_t) != sizeof(OrthancPluginImageFormat))
+        sizeof(int32_t) != sizeof(OrthancPluginImageFormat) ||
+        sizeof(int32_t) != sizeof(OrthancPluginValueRepresentation) ||
+        sizeof(int32_t) != sizeof(OrthancPluginDicomToJsonFormat) ||
+        sizeof(int32_t) != sizeof(OrthancPluginDicomToJsonFlags) ||
+        sizeof(int32_t) != sizeof(OrthancPluginIdentifierConstraint))
     {
       /* Mismatch in the size of the enumerations */
       return 0;
@@ -2167,6 +2273,12 @@ extern "C"
    *
    * This function registers a callback function that is called
    * whenever a change happens to some DICOM resource.
+   *
+   * @warning If your change callback has to call the REST API of
+   * Orthanc, you should make these calls in a separate thread (with
+   * the events passing through a message queue). Otherwise, this
+   * could result in deadlocks in the presence of other plugins or Lua
+   * script.
    * 
    * @param context The Orthanc plugin context, as received by OrthancPluginInitialize().
    * @param callback The callback function.
@@ -3590,7 +3702,6 @@ extern "C"
     OrthancPluginContentType    type;
   } _OrthancPluginStorageAreaRemove;
 
-
   /**
    * @brief Remove a file from the storage area.
    *
@@ -3619,6 +3730,300 @@ extern "C"
   }
 
 
+
+  typedef struct
+  {
+    OrthancPluginErrorCode*  target;
+    int32_t                  code;
+    uint16_t                 httpStatus;
+    const char*              message;
+  } _OrthancPluginRegisterErrorCode;
+  
+  /**
+   * @brief Declare a custom error code for this plugin.
+   *
+   * This function declares a custom error code that can be generated
+   * by this plugin. This declaration is used to enrich the body of
+   * the HTTP answer in the case of an error, and to set the proper
+   * HTTP status code.
+   *
+   * @param context The Orthanc plugin context, as received by OrthancPluginInitialize().
+   * @param code The error code that is internal to this plugin.
+   * @param httpStatus The HTTP status corresponding to this error.
+   * @param message The description of the error.
+   * @return The error code that has been assigned inside the Orthanc core.
+   * @ingroup Toolbox
+   **/
+  ORTHANC_PLUGIN_INLINE OrthancPluginErrorCode  OrthancPluginRegisterErrorCode(
+    OrthancPluginContext*    context,
+    int32_t                  code,
+    uint16_t                 httpStatus,
+    const char*              message)
+  {
+    OrthancPluginErrorCode target;
+
+    _OrthancPluginRegisterErrorCode params;
+    params.target = &target;
+    params.code = code;
+    params.httpStatus = httpStatus;
+    params.message = message;
+
+    if (context->InvokeService(context, _OrthancPluginService_RegisterErrorCode, &params) == OrthancPluginErrorCode_Success)
+    {
+      return target;
+    }
+    else
+    {
+      /* There was an error while assigned the error. Use a generic code. */
+      return OrthancPluginErrorCode_Plugin;
+    }
+  }
+
+
+
+  typedef struct
+  {
+    uint16_t                          group;
+    uint16_t                          element;
+    OrthancPluginValueRepresentation  vr;
+    const char*                       name;
+    uint32_t                          minMultiplicity;
+    uint32_t                          maxMultiplicity;
+  } _OrthancPluginRegisterDictionaryTag;
+  
+  /**
+   * @brief Register a new tag into the DICOM dictionary.
+   *
+   * This function declares a new tag in the dictionary of DICOM tags
+   * that are known to Orthanc. This function should be used in the
+   * OrthancPluginInitialize() callback.
+   *
+   * @param context The Orthanc plugin context, as received by OrthancPluginInitialize().
+   * @param group The group of the tag.
+   * @param element The element of the tag.
+   * @param vr The value representation of the tag.
+   * @param name The nickname of the tag.
+   * @param minMultiplicity The minimum multiplicity of the tag (must be above 0).
+   * @param maxMultiplicity The maximum multiplicity of the tag. A value of 0 means
+   * an arbitrary multiplicity ("<tt>n</tt>").
+   * @return 0 if success, other value if error.
+   * @ingroup Toolbox
+   **/
+  ORTHANC_PLUGIN_INLINE OrthancPluginErrorCode  OrthancPluginRegisterDictionaryTag(
+    OrthancPluginContext*             context,
+    uint16_t                          group,
+    uint16_t                          element,
+    OrthancPluginValueRepresentation  vr,
+    const char*                       name,
+    uint32_t                          minMultiplicity,
+    uint32_t                          maxMultiplicity)
+  {
+    _OrthancPluginRegisterDictionaryTag params;
+    params.group = group;
+    params.element = element;
+    params.vr = vr;
+    params.name = name;
+    params.minMultiplicity = minMultiplicity;
+    params.maxMultiplicity = maxMultiplicity;
+
+    return context->InvokeService(context, _OrthancPluginService_RegisterDictionaryTag, &params);
+  }
+
+
+
+
+  typedef struct
+  {
+    OrthancPluginStorageArea*  storageArea;
+    OrthancPluginResourceType  level;
+  } _OrthancPluginReconstructMainDicomTags;
+
+  /**
+   * @brief Reconstruct the main DICOM tags.
+   *
+   * This function requests the Orthanc core to reconstruct the main
+   * DICOM tags of all the resources of the given type. This function
+   * can only be used as a part of the upgrade of a custom database
+   * back-end
+   * (cf. OrthancPlugins::IDatabaseBackend::UpgradeDatabase). A
+   * database transaction will be automatically setup.
+   *
+   * @param context The Orthanc plugin context, as received by OrthancPluginInitialize().
+   * @param storageArea The storage area.
+   * @param level The type of the resources of interest.
+   * @return 0 if success, other value if error.
+   * @ingroup Callbacks
+   **/
+  ORTHANC_PLUGIN_INLINE OrthancPluginErrorCode  OrthancPluginReconstructMainDicomTags(
+    OrthancPluginContext*      context,
+    OrthancPluginStorageArea*  storageArea,
+    OrthancPluginResourceType  level)
+  {
+    _OrthancPluginReconstructMainDicomTags params;
+    params.level = level;
+    params.storageArea = storageArea;
+
+    return context->InvokeService(context, _OrthancPluginService_ReconstructMainDicomTags, &params);
+  }
+
+
+  typedef struct
+  {
+    char**                          result;
+    const char*                     instanceId;
+    const char*                     buffer;
+    uint32_t                        size;
+    OrthancPluginDicomToJsonFormat  format;
+    OrthancPluginDicomToJsonFlags   flags;
+    uint32_t                        maxStringLength;
+  } _OrthancPluginDicomToJson;
+
+
+  /**
+   * @brief Format a DICOM memory buffer as a JSON string.
+   *
+   * This function takes as input a memory buffer containing a DICOM
+   * file, and outputs a JSON string representing the tags of this
+   * DICOM file.
+   *
+   * @param context The Orthanc plugin context, as received by OrthancPluginInitialize().
+   * @param buffer The memory buffer containing the DICOM file.
+   * @param size The size of the memory buffer.
+   * @param format The output format.
+   * @param flags The output flags.
+   * @param maxStringLength The maximum length of a field. Too long fields will
+   * be output as "null". The 0 value means no maximum length.
+   * @return The NULL value if the case of an error, or the JSON
+   * string. This string must be freed by OrthancPluginFreeString().
+   * @ingroup Toolbox
+   * @see OrthancPluginDicomInstanceToJson
+   **/
+  ORTHANC_PLUGIN_INLINE char* OrthancPluginDicomBufferToJson(
+    OrthancPluginContext*           context,
+    const char*                     buffer,
+    uint32_t                        size,
+    OrthancPluginDicomToJsonFormat  format,
+    OrthancPluginDicomToJsonFlags   flags, 
+    uint32_t                        maxStringLength)
+  {
+    char* result;
+
+    _OrthancPluginDicomToJson params;
+    memset(&params, 0, sizeof(params));
+    params.result = &result;
+    params.buffer = buffer;
+    params.size = size;
+    params.format = format;
+    params.flags = flags;
+    params.maxStringLength = maxStringLength;
+
+    if (context->InvokeService(context, _OrthancPluginService_DicomBufferToJson, &params) != OrthancPluginErrorCode_Success)
+    {
+      /* Error */
+      return NULL;
+    }
+    else
+    {
+      return result;
+    }
+  }
+
+
+  /**
+   * @brief Format a DICOM instance as a JSON string.
+   *
+   * This function formats a DICOM instance that is stored in Orthanc,
+   * and outputs a JSON string representing the tags of this DICOM
+   * instance.
+   *
+   * @param context The Orthanc plugin context, as received by OrthancPluginInitialize().
+   * @param instanceId The Orthanc identifier of the instance.
+   * @param format The output format.
+   * @param flags The output flags.
+   * @param maxStringLength The maximum length of a field. Too long fields will
+   * be output as "null". The 0 value means no maximum length.
+   * @return The NULL value if the case of an error, or the JSON
+   * string. This string must be freed by OrthancPluginFreeString().
+   * @ingroup Toolbox
+   * @see OrthancPluginDicomInstanceToJson
+   **/
+  ORTHANC_PLUGIN_INLINE char* OrthancPluginDicomInstanceToJson(
+    OrthancPluginContext*           context,
+    const char*                     instanceId,
+    OrthancPluginDicomToJsonFormat  format,
+    OrthancPluginDicomToJsonFlags   flags, 
+    uint32_t                        maxStringLength)
+  {
+    char* result;
+
+    _OrthancPluginDicomToJson params;
+    memset(&params, 0, sizeof(params));
+    params.result = &result;
+    params.instanceId = instanceId;
+    params.format = format;
+    params.flags = flags;
+    params.maxStringLength = maxStringLength;
+
+    if (context->InvokeService(context, _OrthancPluginService_DicomInstanceToJson, &params) != OrthancPluginErrorCode_Success)
+    {
+      /* Error */
+      return NULL;
+    }
+    else
+    {
+      return result;
+    }
+  }
+
+
+  typedef struct
+  {
+    OrthancPluginMemoryBuffer*  target;
+    const char*                 uri;
+    uint32_t                    headersCount;
+    const char* const*          headersKeys;
+    const char* const*          headersValues;
+    int32_t                     afterPlugins;
+  } _OrthancPluginRestApiGet2;
+
+  /**
+   * @brief Make a GET call to the Orthanc REST API, with custom HTTP headers.
+   * 
+   * Make a GET call to the Orthanc REST API with extended
+   * parameters. The result to the query is stored into a newly
+   * allocated memory buffer.
+   * 
+   * @param context The Orthanc plugin context, as received by OrthancPluginInitialize().
+   * @param target The target memory buffer.
+   * @param uri The URI in the built-in Orthanc API.
+   * @param headersCount The number of HTTP headers.
+   * @param headersKeys Array containing the keys of the HTTP headers.
+   * @param headersValues Array containing the values of the HTTP headers.
+   * @param afterPlugins If 0, the built-in API of Orthanc is used.
+   * If 1, the API is tainted by the plugins.
+   * @return 0 if success, or the error code if failure.
+   * @see OrthancPluginRestApiGet, OrthancPluginRestApiGetAfterPlugins
+   * @ingroup Orthanc
+   **/
+  ORTHANC_PLUGIN_INLINE OrthancPluginErrorCode  OrthancPluginRestApiGet2(
+    OrthancPluginContext*       context,
+    OrthancPluginMemoryBuffer*  target,
+    const char*                 uri,
+    uint32_t                    headersCount,
+    const char* const*          headersKeys,
+    const char* const*          headersValues,
+    int32_t                     afterPlugins)
+  {
+    _OrthancPluginRestApiGet2 params;
+    params.target = target;
+    params.uri = uri;
+    params.headersCount = headersCount;
+    params.headersKeys = headersKeys;
+    params.headersValues = headersValues;
+    params.afterPlugins = afterPlugins;
+
+    return context->InvokeService(context, _OrthancPluginService_RestApiGet2, &params);
+  }
 
 #ifdef  __cplusplus
 }

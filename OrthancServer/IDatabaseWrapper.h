@@ -51,6 +51,10 @@ namespace Orthanc
     {
     }
 
+    virtual void Open() = 0;
+
+    virtual void Close() = 0;
+
     virtual void AddAttachment(int64_t id,
                                const FileInfo& attachment) = 0;
 
@@ -78,6 +82,9 @@ namespace Orthanc
 
     virtual void GetAllMetadata(std::map<MetadataType, std::string>& target,
                                 int64_t id) = 0;
+
+    virtual void GetAllInternalIds(std::list<int64_t>& target,
+                                   ResourceType resourceType) = 0;
 
     virtual void GetAllPublicIds(std::list<std::string>& target,
                                  ResourceType resourceType) = 0;
@@ -142,11 +149,10 @@ namespace Orthanc
     virtual bool LookupGlobalProperty(std::string& target,
                                       GlobalProperty property) = 0;
 
-    virtual void LookupIdentifier(std::list<int64_t>& target,
+    virtual void LookupIdentifier(std::list<int64_t>& result,
+                                  ResourceType level,
                                   const DicomTag& tag,
-                                  const std::string& value) = 0;
-
-    virtual void LookupIdentifier(std::list<int64_t>& target,
+                                  IdentifierConstraintType type,
                                   const std::string& value) = 0;
 
     virtual bool LookupMetadata(std::string& target,
@@ -168,9 +174,15 @@ namespace Orthanc
     virtual void SetGlobalProperty(GlobalProperty property,
                                    const std::string& value) = 0;
 
+    virtual void ClearMainDicomTags(int64_t id) = 0;
+
     virtual void SetMainDicomTag(int64_t id,
                                  const DicomTag& tag,
                                  const std::string& value) = 0;
+
+    virtual void SetIdentifierTag(int64_t id,
+                                  const DicomTag& tag,
+                                  const std::string& value) = 0;
 
     virtual void SetMetadata(int64_t id,
                              MetadataType type,

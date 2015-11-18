@@ -32,30 +32,25 @@
 
 #pragma once
 
-#include "DicomValue.h"
+#include "IRunnableBySteps.h"
+
+#include <boost/shared_ptr.hpp>
 
 namespace Orthanc
 {
-  class DicomNullValue : public DicomValue
+  class RunnableWorkersPool : public boost::noncopyable
   {
+  private:
+    struct PImpl;
+    boost::shared_ptr<PImpl> pimpl_;
+
+    void Stop();
+
   public:
-    DicomNullValue()
-    {
-    }
+    RunnableWorkersPool(size_t countWorkers);
 
-    virtual DicomValue* Clone() const 
-    {
-      return new DicomNullValue();
-    }
+    ~RunnableWorkersPool();
 
-    virtual std::string AsString() const
-    {
-      return "(null)";
-    }
-
-    virtual bool IsNull() const
-    {
-      return true;
-    }
+    void Add(IRunnableBySteps* runnable);  // Takes the ownership
   };
 }

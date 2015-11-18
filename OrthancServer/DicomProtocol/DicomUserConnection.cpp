@@ -272,10 +272,22 @@ namespace Orthanc
     const std::string syntax(xfer.getXferID());
     bool isGeneric = IsGenericTransferSyntax(syntax);
 
-    if (isGeneric ^ IsGenericTransferSyntax(connection.GetPreferredTransferSyntax()))
+    bool renegociate;
+    if (isGeneric)
     {
-      // Making a generic-to-specific or specific-to-generic change of
-      // the transfer syntax. Renegotiate the connection.
+      // Are we making a generic-to-specific or specific-to-generic change of
+      // the transfer syntax? If this is the case, renegotiate the connection.
+      renegociate = !IsGenericTransferSyntax(connection.GetPreferredTransferSyntax());
+    }
+    else
+    {
+      // We are using a specific transfer syntax. Renegociate if the
+      // current connection does not match this transfer syntax.
+      renegociate = (syntax != connection.GetPreferredTransferSyntax());
+    }
+
+    if (renegociate)
+    {
       LOG(INFO) << "Change in the transfer syntax: the C-Store associated must be renegotiated";
 
       if (isGeneric)
@@ -372,8 +384,9 @@ namespace Orthanc
   }
 
 
-  static void CheckFindQuery(ResourceType level,
-                             const DicomMap& fields)
+  static void FixFindQuery(DicomMap& fixedQuery,
+                           ResourceType level,
+                           const DicomMap& fields)
   {
     std::set<DicomTag> allowedTags;
 
@@ -410,8 +423,11 @@ namespace Orthanc
       const DicomTag& tag = query.GetElement(i).GetTag();
       if (allowedTags.find(tag) == allowedTags.end())
       {
-        LOG(ERROR) << "Tag not allowed for this C-Find level: " << tag;
-        throw OrthancException(ErrorCode_BadRequest);
+        LOG(WARNING) << "Tag not allowed for this C-Find level, will be ignored: " << tag;
+      }
+      else
+      {
+        fixedQuery.SetValue(tag, query.GetElement(i).GetValue());
       }
     }
   }
@@ -441,7 +457,8 @@ namespace Orthanc
             const DicomValue* value = fix->TestAndGetValue(*it);
 
             if (value != NULL && 
-                value->AsString() == "*")
+                !value->IsNull() &&
+                value->GetContent() == "*")
             {
               fix->SetValue(*it, "");
             }
@@ -459,9 +476,10 @@ namespace Orthanc
 
   void DicomUserConnection::Find(DicomFindAnswers& result,
                                  ResourceType level,
-                                 const DicomMap& fields)
+                                 const DicomMap& originalFields)
   {
-    CheckFindQuery(level, fields);
+    DicomMap fields;
+    FixFindQuery(fields, level, originalFields);
 
     CheckIsOpen();
 
@@ -931,7 +949,7 @@ namespace Orthanc
       throw OrthancException(ErrorCode_InternalError);
     }
 
-    const std::string tmp = findResult.GetValue(DICOM_TAG_QUERY_RETRIEVE_LEVEL).AsString();
+    const std::string tmp = findResult.GetValue(DICOM_TAG_QUERY_RETRIEVE_LEVEL).GetContent();
     ResourceType level = StringToResourceType(tmp.c_str());
 
     DicomMap move;

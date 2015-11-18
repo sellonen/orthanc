@@ -114,6 +114,12 @@ namespace Orthanc
     if (*this == DICOM_TAG_PATIENT_NAME)
       return "PatientName";
 
+    if (*this == DICOM_TAG_IMAGE_POSITION_PATIENT)
+      return "ImagePositionPatient";
+
+    if (*this == DICOM_TAG_IMAGE_ORIENTATION_PATIENT)
+      return "ImageOrientationPatient";
+
     return "";
   }
 
@@ -242,15 +248,5 @@ namespace Orthanc
       default:
         throw OrthancException(ErrorCode_ParameterOutOfRange);
     }
-  }
-
-
-  bool DicomTag::IsIdentifier() const
-  {
-    return (*this == DICOM_TAG_PATIENT_ID ||
-            *this == DICOM_TAG_STUDY_INSTANCE_UID ||
-            *this == DICOM_TAG_ACCESSION_NUMBER ||
-            *this == DICOM_TAG_SERIES_INSTANCE_UID ||
-            *this == DICOM_TAG_SOP_INSTANCE_UID);
   }
 }

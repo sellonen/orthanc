@@ -522,7 +522,9 @@ extern "C"
       void* payload,
       int32_t property);
 
-    /* Output: Use OrthancPluginDatabaseAnswerInt64() */
+    /* Use "OrthancPluginDatabaseExtensions::lookupIdentifier3" 
+       instead of this function as of Orthanc 0.9.5 (db v6), can be set to NULL.
+       Output: Use OrthancPluginDatabaseAnswerInt64() */
     OrthancPluginErrorCode  (*lookupIdentifier) (
       /* outputs */
       OrthancPluginDatabaseContext* context,
@@ -530,7 +532,8 @@ extern "C"
       void* payload,
       const OrthancPluginDicomTag* tag);
 
-    /* Output: Use OrthancPluginDatabaseAnswerInt64() */
+    /* Unused starting with Orthanc 0.9.5 (db v6), can be set to NULL.
+       Output: Use OrthancPluginDatabaseAnswerInt64() */
     OrthancPluginErrorCode  (*lookupIdentifier2) (
       /* outputs */
       OrthancPluginDatabaseContext* context,
@@ -655,7 +658,30 @@ extern "C"
       void* payload,
       uint32_t targetVersion,
       OrthancPluginStorageArea* storageArea);
-  } OrthancPluginDatabaseExtensions;
+ 
+    OrthancPluginErrorCode  (*clearMainDicomTags) (
+      /* inputs */
+      void* payload,
+      int64_t id);
+
+    /* Output: Use OrthancPluginDatabaseAnswerInt64() */
+    OrthancPluginErrorCode  (*getAllInternalIds) (
+      /* outputs */
+      OrthancPluginDatabaseContext* context,
+      /* inputs */
+      void* payload,
+      OrthancPluginResourceType resourceType);
+
+    /* Output: Use OrthancPluginDatabaseAnswerInt64() */
+    OrthancPluginErrorCode  (*lookupIdentifier3) (
+      /* outputs */
+      OrthancPluginDatabaseContext* context,
+      /* inputs */
+      void* payload,
+      OrthancPluginResourceType resourceType,
+      const OrthancPluginDicomTag* tag,
+      OrthancPluginIdentifierConstraint constraint);
+   } OrthancPluginDatabaseExtensions;
 
 /*<! @endcond */
 

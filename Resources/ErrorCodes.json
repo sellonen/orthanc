@@ -175,7 +175,27 @@
     "Name": "BadFont", 
     "Description": "Badly formatted font file"
   },
-
+  {
+    "Code": 31, 
+    "Name": "DatabasePlugin", 
+    "Description": "The plugin implementing a custom database back-end does not fulfill the proper interface"
+  }, 
+  {
+    "Code": 32, 
+    "Name": "StorageAreaPlugin", 
+    "Description": "Error in the plugin implementing a custom storage area"
+  },
+  {
+    "Code": 33,
+    "Name": "EmptyRequest",
+    "Description": "The request is empty"
+  }, 
+  {
+    "Code": 34, 
+    "HttpStatus": 406, 
+    "Name": "NotAcceptable", 
+    "Description": "Cannot send a response which is acceptable according to the Accept HTTP header"
+  },
 
 
 
@@ -478,10 +498,20 @@
     "Code": 2037,
     "Name": "DatabaseBackendAlreadyRegistered",
     "Description": "Another plugin has already registered a custom database back-end"
-  }, 
+  },
   {
-    "Code": 2038, 
-    "Name": "DatabasePlugin", 
-    "Description": "The plugin implementing a custom database back-end does not fulfill the proper interface"
+    "Code": 2038,
+    "Name": "DatabaseNotInitialized",
+    "Description": "Plugin trying to call the database during its initialization"
+  },
+  { 
+    "Code": 2039,
+    "Name": "SslDisabled",
+    "Description": "Orthanc has been built without SSL support"
+  },
+  {
+    "Code": 2040,
+    "Name": "CannotOrderSlices",
+    "Description": "Unable to order the slices of the series"
   }
 ]

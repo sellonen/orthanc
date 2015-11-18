@@ -47,6 +47,7 @@
 #include "Scheduler/ServerScheduler.h"
 #include "ServerIndex.h"
 #include "OrthancHttpHandler.h"
+#include "Search/LookupResource.h"
 
 #include <boost/filesystem.hpp>
 #include <boost/thread.hpp>
@@ -184,8 +185,12 @@ namespace Orthanc
                       DicomInstanceToStore& dicom);
 
     void AnswerAttachment(RestApiOutput& output,
-                          const std::string& instancePublicId,
+                          const std::string& resourceId,
                           FileContentType content);
+
+    void ChangeAttachmentCompression(const std::string& resourceId,
+                                     FileContentType attachmentType,
+                                     CompressionType compression);
 
     void ReadJson(Json::Value& result,
                   const std::string& instancePublicId);
@@ -195,6 +200,9 @@ namespace Orthanc
                   const std::string& instancePublicId,
                   FileContentType content,
                   bool uncompressIfNeeded = true);
+
+    void ReadFile(std::string& result,
+                  const FileInfo& file);
 
     void SetStoreMD5ForAttachments(bool storeMD5);
 
@@ -241,6 +249,10 @@ namespace Orthanc
 
     void Stop();
 
+    bool Apply(std::list<std::string>& result,
+               const ::Orthanc::LookupResource& lookup,
+               size_t maxResults);
+
 
     /**
      * Management of the plugins
@@ -252,9 +264,10 @@ namespace Orthanc
     void ResetPlugins();
 
     const OrthancPlugins& GetPlugins() const;
+
+    OrthancPlugins& GetPlugins();
 #endif
 
     bool HasPlugins() const;
-
   };
 }

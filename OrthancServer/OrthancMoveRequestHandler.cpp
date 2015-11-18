@@ -105,18 +105,50 @@ namespace Orthanc
 
 
   bool OrthancMoveRequestHandler::LookupIdentifier(std::string& publicId,
-                                                   DicomTag tag,
+                                                   ResourceType level,
                                                    const DicomMap& input)
   {
+    DicomTag tag(0, 0);   // Dummy initialization
+
+    switch (level)
+    {
+      case ResourceType_Patient:
+        tag = DICOM_TAG_PATIENT_ID;
+        break;
+
+      case ResourceType_Study:
+        tag = (input.HasTag(DICOM_TAG_ACCESSION_NUMBER) ? 
+               DICOM_TAG_ACCESSION_NUMBER : DICOM_TAG_STUDY_INSTANCE_UID);
+        break;
+        
+      case ResourceType_Series:
+        tag = DICOM_TAG_SERIES_INSTANCE_UID;
+        break;
+        
+      case ResourceType_Instance:
+        tag = DICOM_TAG_SOP_INSTANCE_UID;
+        break;
+
+      default:
+        throw OrthancException(ErrorCode_ParameterOutOfRange);
+    }
+
     if (!input.HasTag(tag))
     {
       return false;
     }
 
-    std::string value = input.GetValue(tag).AsString();
+    const DicomValue& value = input.GetValue(tag);
+    if (value.IsNull() ||
+        value.IsBinary())
+    {
+      return false;
+    }
+
+    const std::string& content = value.GetContent();
 
     std::list<std::string> ids;
-    context_.GetIndex().LookupIdentifier(ids, tag, value);
+    context_.GetIndex().LookupIdentifierExact(ids, level, tag, content);
 
     if (ids.size() != 1)
     {
@@ -145,7 +177,7 @@ namespace Orthanc
         {
           LOG(INFO) << "  " << query.GetElement(i).GetTag()
                     << "  " << FromDcmtkBridge::GetName(query.GetElement(i).GetTag())
-                    << " = " << query.GetElement(i).GetValue().AsString();
+                    << " = " << query.GetElement(i).GetValue().GetContent();
         }
       }
     }
@@ -156,14 +188,11 @@ namespace Orthanc
      * Retrieve the query level.
      **/
 
-    ResourceType level;
     const DicomValue* levelTmp = input.TestAndGetValue(DICOM_TAG_QUERY_RETRIEVE_LEVEL);
 
-    if (levelTmp != NULL) 
-    {
-      level = StringToResourceType(levelTmp->AsString().c_str());
-    }
-    else
+    if (levelTmp == NULL ||
+        levelTmp->IsNull() ||
+        levelTmp->IsBinary())
     {
       // The query level is not present in the C-Move request, which
       // does not follow the DICOM standard. This is for instance the
@@ -173,10 +202,10 @@ namespace Orthanc
 
       std::string publicId;
 
-      if (LookupIdentifier(publicId, DICOM_TAG_SOP_INSTANCE_UID, input) ||
-          LookupIdentifier(publicId, DICOM_TAG_SERIES_INSTANCE_UID, input) ||
-          LookupIdentifier(publicId, DICOM_TAG_STUDY_INSTANCE_UID, input) ||
-          LookupIdentifier(publicId, DICOM_TAG_PATIENT_ID, input))
+      if (LookupIdentifier(publicId, ResourceType_Instance, input) ||
+          LookupIdentifier(publicId, ResourceType_Series, input) ||
+          LookupIdentifier(publicId, ResourceType_Study, input) ||
+          LookupIdentifier(publicId, ResourceType_Patient, input))
       {
         return new OrthancMoveRequestIterator(context_, targetAet, publicId);
       }
@@ -187,42 +216,23 @@ namespace Orthanc
       }
     }
 
+    assert(levelTmp != NULL);
+    ResourceType level = StringToResourceType(levelTmp->GetContent().c_str());      
 
 
     /**
      * Lookup for the resource to be sent.
      **/
 
-    bool ok;
     std::string publicId;
 
-    switch (level)
+    if (LookupIdentifier(publicId, level, input))
     {
-      case ResourceType_Patient:
-        ok = LookupIdentifier(publicId, DICOM_TAG_PATIENT_ID, input);
-        break;
-
-      case ResourceType_Study:
-        ok = LookupIdentifier(publicId, DICOM_TAG_STUDY_INSTANCE_UID, input);
-        break;
-
-      case ResourceType_Series:
-        ok = LookupIdentifier(publicId, DICOM_TAG_SERIES_INSTANCE_UID, input);
-        break;
-
-      case ResourceType_Instance:
-        ok = LookupIdentifier(publicId, DICOM_TAG_SOP_INSTANCE_UID, input);
-        break;
-
-      default:
-        ok = false;
+      return new OrthancMoveRequestIterator(context_, targetAet, publicId);
     }
-
-    if (!ok)
+    else
     {
       throw OrthancException(ErrorCode_BadRequest);
     }
-
-    return new OrthancMoveRequestIterator(context_, targetAet, publicId);
   }
 }

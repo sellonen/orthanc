@@ -36,6 +36,7 @@
 
 #include "../../OrthancServer/IDatabaseWrapper.h"
 #include "../Include/orthanc/OrthancCDatabasePlugin.h"
+#include "PluginsErrorDictionary.h"
 #include "SharedLibrary.h"
 
 namespace Orthanc
@@ -48,6 +49,7 @@ namespace Orthanc
     typedef std::pair<int64_t, ResourceType>  AnswerResource;
 
     SharedLibrary&  library_;
+    PluginsErrorDictionary&  errorDictionary_;
     _OrthancPluginDatabaseAnswerType type_;
     OrthancPluginDatabaseBackend backend_;
     OrthancPluginDatabaseExtensions extensions_;
@@ -70,6 +72,8 @@ namespace Orthanc
       return reinterpret_cast<OrthancPluginDatabaseContext*>(this);
     }
 
+    void CheckSuccess(OrthancPluginErrorCode code);
+
     void ResetAnswers();
 
     void ForwardAnswers(std::list<int64_t>& target);
@@ -82,10 +86,21 @@ namespace Orthanc
 
   public:
     OrthancPluginDatabase(SharedLibrary& library,
+                          PluginsErrorDictionary&  errorDictionary,
                           const OrthancPluginDatabaseBackend& backend,
                           const OrthancPluginDatabaseExtensions* extensions,
                           size_t extensionsSize,
                           void *payload);
+
+    virtual void Open()
+    {
+      CheckSuccess(backend_.open(payload_));
+    }
+
+    virtual void Close()
+    {
+      CheckSuccess(backend_.close(payload_));
+    }
 
     const SharedLibrary& GetSharedLibrary() const
     {
@@ -124,6 +139,9 @@ namespace Orthanc
 
     virtual void GetAllMetadata(std::map<MetadataType, std::string>& target,
                                 int64_t id);
+
+    virtual void GetAllInternalIds(std::list<int64_t>& target,
+                                   ResourceType resourceType);
 
     virtual void GetAllPublicIds(std::list<std::string>& target,
                                  ResourceType resourceType);
@@ -188,11 +206,10 @@ namespace Orthanc
     virtual bool LookupGlobalProperty(std::string& target,
                                       GlobalProperty property);
 
-    virtual void LookupIdentifier(std::list<int64_t>& target,
+    virtual void LookupIdentifier(std::list<int64_t>& result,
+                                  ResourceType level,
                                   const DicomTag& tag,
-                                  const std::string& value);
-
-    virtual void LookupIdentifier(std::list<int64_t>& target,
+                                  IdentifierConstraintType type,
                                   const std::string& value);
 
     virtual bool LookupMetadata(std::string& target,
@@ -214,9 +231,15 @@ namespace Orthanc
     virtual void SetGlobalProperty(GlobalProperty property,
                                    const std::string& value);
 
+    virtual void ClearMainDicomTags(int64_t id);
+
     virtual void SetMainDicomTag(int64_t id,
                                  const DicomTag& tag,
                                  const std::string& value);
+
+    virtual void SetIdentifierTag(int64_t id,
+                                  const DicomTag& tag,
+                                  const std::string& value);
 
     virtual void SetMetadata(int64_t id,
                              MetadataType type,

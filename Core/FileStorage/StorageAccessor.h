@@ -41,6 +41,7 @@
 #include <string>
 #include <boost/noncopyable.hpp>
 #include <stdint.h>
+#include <json/value.h>
 
 namespace Orthanc
 {
@@ -50,7 +51,8 @@ namespace Orthanc
     IStorageArea&  area_;
 
     void SetupSender(BufferHttpSender& sender,
-                     const FileInfo& info);
+                     const FileInfo& info,
+                     const std::string& mime);
 
   public:
     StorageAccessor(IStorageArea& area) : area_(area)
@@ -75,15 +77,20 @@ namespace Orthanc
     void Read(std::string& content,
               const FileInfo& info);
 
+    void Read(Json::Value& content,
+              const FileInfo& info);
+
     void Remove(const FileInfo& info)
     {
       area_.Remove(info.GetUuid(), info.GetContentType());
     }
 
     void AnswerFile(HttpOutput& output,
-                    const FileInfo& info);
+                    const FileInfo& info,
+                    const std::string& mime);
 
     void AnswerFile(RestApiOutput& output,
-                    const FileInfo& info);
+                    const FileInfo& info,
+                    const std::string& mime);
   };
 }

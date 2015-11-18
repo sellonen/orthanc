@@ -36,10 +36,10 @@
 #include "IMoveRequestHandlerFactory.h"
 #include "IStoreRequestHandlerFactory.h"
 #include "IApplicationEntityFilter.h"
-#include "../../Core/MultiThreading/BagOfRunnablesBySteps.h"
 
 #include <boost/shared_ptr.hpp>
 #include <boost/noncopyable.hpp>
+
 
 namespace Orthanc
 {
@@ -55,28 +55,20 @@ namespace Orthanc
     bool continue_;
     bool started_;
     uint32_t clientTimeout_;
-    bool isThreaded_;
     IFindRequestHandlerFactory* findRequestHandlerFactory_;
     IMoveRequestHandlerFactory* moveRequestHandlerFactory_;
     IStoreRequestHandlerFactory* storeRequestHandlerFactory_;
     IApplicationEntityFilter* applicationEntityFilter_;
 
-    BagOfRunnablesBySteps bagOfDispatchers_;  // This is used iff the server is threaded
-
     static void ServerThread(DicomServer* server);
 
   public:
-    static void InitializeDictionary();
-
     DicomServer();
 
     ~DicomServer();
 
     void SetPortNumber(uint16_t port);
     uint16_t GetPortNumber() const;
-
-    void SetThreaded(bool isThreaded);
-    bool IsThreaded() const;
 
     void SetClientTimeout(uint32_t timeout);
     uint32_t GetClientTimeout() const;

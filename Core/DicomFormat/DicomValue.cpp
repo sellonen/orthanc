@@ -30,35 +30,64 @@
  **/
 
 
-#pragma once
+#include "../PrecompiledHeaders.h"
+#include "DicomValue.h"
 
-#include "IRunnableBySteps.h"
-
-#include <boost/noncopyable.hpp>
-#include <boost/shared_ptr.hpp>
+#include "../OrthancException.h"
+#include "../Toolbox.h"
 
 namespace Orthanc
 {
-  class BagOfRunnablesBySteps : public boost::noncopyable
+  DicomValue::DicomValue(const DicomValue& other) : 
+    type_(other.type_),
+    content_(other.content_)
   {
-  private:
-    struct PImpl;
-    boost::shared_ptr<PImpl> pimpl_;
+  }
 
-    static void RunnableThread(BagOfRunnablesBySteps* bag,
-                               IRunnableBySteps* runnable);
 
-    static void FinishListener(BagOfRunnablesBySteps* bag);
+  DicomValue::DicomValue(const std::string& content,
+                         bool isBinary) :
+    type_(isBinary ? Type_Binary : Type_String),
+    content_(content)
+  {
+  }
+  
+  
+  DicomValue::DicomValue(const char* data,
+                         size_t size,
+                         bool isBinary) :
+    type_(isBinary ? Type_Binary : Type_String)
+  {
+    content_.assign(data, size);
+  }
+    
+  
+  const std::string& DicomValue::GetContent() const
+  {
+    if (type_ == Type_Null)
+    {
+      throw OrthancException(ErrorCode_BadParameterType);
+    }
+    else
+    {
+      return content_;
+    }
+  }
 
-  public:
-    BagOfRunnablesBySteps();
 
-    ~BagOfRunnablesBySteps();
+  DicomValue* DicomValue::Clone() const
+  {
+    return new DicomValue(*this);
+  }
 
-    void Add(IRunnableBySteps* runnable);
+  
+#if !defined(ORTHANC_ENABLE_BASE64) || ORTHANC_ENABLE_BASE64 == 1
+  void DicomValue::FormatDataUriScheme(std::string& target,
+                                       const std::string& mime) const
+  {
+    Toolbox::EncodeBase64(target, GetContent());
+    target.insert(0, "data:" + mime + ";base64,");
+  }
+#endif
 
-    void StopAll();
-
-    void Finalize();
-  };
 }

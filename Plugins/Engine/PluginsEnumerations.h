@@ -37,13 +37,17 @@
 #include "../Include/orthanc/OrthancCPlugin.h"
 #include "../../OrthancServer/ServerEnumerations.h"
 
+#if !defined(ORTHANC_ENABLE_DCMTK) || ORTHANC_ENABLE_DCMTK != 0
+#include <dcmtk/dcmdata/dcvr.h>
+#endif
+
 namespace Orthanc
 {
   namespace Plugins
   {
-    ErrorCode Convert(OrthancPluginErrorCode error);
-
     OrthancPluginResourceType Convert(ResourceType type);
+
+    ResourceType Convert(OrthancPluginResourceType type);
 
     OrthancPluginChangeType Convert(ChangeType type);
 
@@ -54,6 +58,16 @@ namespace Orthanc
     OrthancPluginContentType Convert(FileContentType type);
 
     FileContentType Convert(OrthancPluginContentType type);
+
+    DicomToJsonFormat Convert(OrthancPluginDicomToJsonFormat format);
+
+    OrthancPluginIdentifierConstraint Convert(IdentifierConstraintType constraint);
+
+    IdentifierConstraintType Convert(OrthancPluginIdentifierConstraint constraint);
+
+#if !defined(ORTHANC_ENABLE_DCMTK) || ORTHANC_ENABLE_DCMTK != 0
+    DcmEVR Convert(OrthancPluginValueRepresentation vr);
+#endif
   }
 }
 

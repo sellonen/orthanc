@@ -34,6 +34,8 @@
 #include "gtest/gtest.h"
 
 #include <ctype.h>
+#include <boost/lexical_cast.hpp>
+#include <algorithm>
 
 #include "../Core/ChunkedBuffer.h"
 #include "../Core/HttpClient.h"
@@ -43,6 +45,7 @@
 #include "../Core/OrthancException.h"
 #include "../Core/Compression/ZlibCompressor.h"
 #include "../Core/RestApi/RestApiHierarchy.h"
+#include "../Core/HttpServer/HttpContentNegociation.h"
 
 using namespace Orthanc;
 
@@ -334,4 +337,127 @@ TEST(RestApi, RestApiHierarchy)
   ASSERT_EQ(testValue, 3);
   ASSERT_TRUE(HandleGet(root, "/hello2/a/b"));
   ASSERT_EQ(testValue, 4);
+}
+
+
+
+
+
+namespace
+{
+  class AcceptHandler : public Orthanc::HttpContentNegociation::IHandler
+  {
+  private:
+    std::string type_;
+    std::string subtype_;
+
+  public:
+    AcceptHandler()
+    {
+      Reset();
+    }
+
+    void Reset()
+    {
+      Handle("nope", "nope");
+    }
+
+    const std::string& GetType() const
+    {
+      return type_;
+    }
+
+    const std::string& GetSubType() const
+    {
+      return subtype_;
+    }
+
+    virtual void Handle(const std::string& type,
+                        const std::string& subtype)
+    {
+      type_ = type;
+      subtype_ = subtype;
+    }
+  };
+}
+
+
+TEST(RestApi, HttpContentNegociation)
+{
+  // Reference: http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.1
+
+  AcceptHandler h;
+
+  {
+    Orthanc::HttpContentNegociation d;
+    d.Register("audio/mp3", h);
+    d.Register("audio/basic", h);
+
+    ASSERT_TRUE(d.Apply("audio/*; q=0.2, audio/basic"));
+    ASSERT_EQ("audio", h.GetType());
+    ASSERT_EQ("basic", h.GetSubType());
+
+    ASSERT_TRUE(d.Apply("audio/*; q=0.2, audio/nope"));
+    ASSERT_EQ("audio", h.GetType());
+    ASSERT_EQ("mp3", h.GetSubType());
+    
+    ASSERT_FALSE(d.Apply("application/*; q=0.2, application/pdf"));
+    
+    ASSERT_TRUE(d.Apply("*/*; application/*; q=0.2, application/pdf"));
+    ASSERT_EQ("audio", h.GetType());
+  }
+
+  // "This would be interpreted as "text/html and text/x-c are the
+  // preferred media types, but if they do not exist, then send the
+  // text/x-dvi entity, and if that does not exist, send the
+  // text/plain entity.""
+  const std::string T1 = "text/plain; q=0.5, text/html, text/x-dvi; q=0.8, text/x-c";
+  
+  {
+    Orthanc::HttpContentNegociation d;
+    d.Register("text/plain", h);
+    d.Register("text/html", h);
+    d.Register("text/x-dvi", h);
+    ASSERT_TRUE(d.Apply(T1));
+    ASSERT_EQ("text", h.GetType());
+    ASSERT_EQ("html", h.GetSubType());
+  }
+  
+  {
+    Orthanc::HttpContentNegociation d;
+    d.Register("text/plain", h);
+    d.Register("text/x-dvi", h);
+    d.Register("text/x-c", h);
+    ASSERT_TRUE(d.Apply(T1));
+    ASSERT_EQ("text", h.GetType());
+    ASSERT_EQ("x-c", h.GetSubType());
+  }
+  
+  {
+    Orthanc::HttpContentNegociation d;
+    d.Register("text/plain", h);
+    d.Register("text/x-dvi", h);
+    d.Register("text/x-c", h);
+    d.Register("text/html", h);
+    ASSERT_TRUE(d.Apply(T1));
+    ASSERT_EQ("text", h.GetType());
+    ASSERT_TRUE(h.GetSubType() == "x-c" || h.GetSubType() == "html");
+  }
+  
+  {
+    Orthanc::HttpContentNegociation d;
+    d.Register("text/plain", h);
+    d.Register("text/x-dvi", h);
+    ASSERT_TRUE(d.Apply(T1));
+    ASSERT_EQ("text", h.GetType());
+    ASSERT_EQ("x-dvi", h.GetSubType());
+  }
+  
+  {
+    Orthanc::HttpContentNegociation d;
+    d.Register("text/plain", h);
+    ASSERT_TRUE(d.Apply(T1));
+    ASSERT_EQ("text", h.GetType());
+    ASSERT_EQ("plain", h.GetSubType());
+  }
 }

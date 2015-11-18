@@ -35,7 +35,6 @@
 
 #include <stdio.h>
 #include <memory>
-#include "DicomString.h"
 #include "DicomArray.h"
 #include "../OrthancException.h"
 
@@ -57,10 +56,10 @@ namespace Orthanc
   {
     //DicomTag(0x0010, 0x1020), // PatientSize
     //DicomTag(0x0010, 0x1030)  // PatientWeight
-    DicomTag(0x0008, 0x0020),   // StudyDate
+    DICOM_TAG_STUDY_DATE,
     DicomTag(0x0008, 0x0030),   // StudyTime
-    DicomTag(0x0008, 0x1030),   // StudyDescription
     DicomTag(0x0020, 0x0010),   // StudyID
+    DICOM_TAG_STUDY_DESCRIPTION,
     DICOM_TAG_ACCESSION_NUMBER,
     DICOM_TAG_STUDY_INSTANCE_UID
   };
@@ -70,10 +69,10 @@ namespace Orthanc
     //DicomTag(0x0010, 0x1080), // MilitaryRank
     DicomTag(0x0008, 0x0021),   // SeriesDate
     DicomTag(0x0008, 0x0031),   // SeriesTime
-    DicomTag(0x0008, 0x0060),   // Modality
+    DICOM_TAG_MODALITY,
     DicomTag(0x0008, 0x0070),   // Manufacturer
     DicomTag(0x0008, 0x1010),   // StationName
-    DicomTag(0x0008, 0x103e),   // SeriesDescription
+    DICOM_TAG_SERIES_DESCRIPTION,
     DicomTag(0x0018, 0x0015),   // BodyPartExamined
     DicomTag(0x0018, 0x0024),   // SequenceName
     DicomTag(0x0018, 0x1030),   // ProtocolName
@@ -83,7 +82,8 @@ namespace Orthanc
     DICOM_TAG_NUMBER_OF_TEMPORAL_POSITIONS,
     DICOM_TAG_NUMBER_OF_SLICES,
     DICOM_TAG_NUMBER_OF_TIME_SLICES,
-    DICOM_TAG_SERIES_INSTANCE_UID
+    DICOM_TAG_SERIES_INSTANCE_UID,
+    DICOM_TAG_IMAGE_ORIENTATION_PATIENT    // New in db v6
   };
 
   static DicomTag instanceTags[] =
@@ -95,10 +95,41 @@ namespace Orthanc
     DICOM_TAG_INSTANCE_NUMBER,
     DICOM_TAG_NUMBER_OF_FRAMES,
     DICOM_TAG_TEMPORAL_POSITION_IDENTIFIER,
-    DICOM_TAG_SOP_INSTANCE_UID
+    DICOM_TAG_SOP_INSTANCE_UID,
+    DICOM_TAG_IMAGE_POSITION_PATIENT    // New in db v6
   };
 
 
+  void DicomMap::LoadMainDicomTags(const DicomTag*& tags,
+                                   size_t& size,
+                                   ResourceType level)
+  {
+    switch (level)
+    {
+      case ResourceType_Patient:
+        tags = patientTags;
+        size = sizeof(patientTags) / sizeof(DicomTag);
+        break;
+
+      case ResourceType_Study:
+        tags = studyTags;
+        size = sizeof(studyTags) / sizeof(DicomTag);
+        break;
+
+      case ResourceType_Series:
+        tags = seriesTags;
+        size = sizeof(seriesTags) / sizeof(DicomTag);
+        break;
+
+      case ResourceType_Instance:
+        tags = instanceTags;
+        size = sizeof(instanceTags) / sizeof(DicomTag);
+        break;
+
+      default:
+        throw OrthancException(ErrorCode_ParameterOutOfRange);
+    }
+  }
 
 
   void DicomMap::SetValue(uint16_t group, 
@@ -283,6 +314,7 @@ namespace Orthanc
     result.Remove(DICOM_TAG_NUMBER_OF_SLICES);
     result.Remove(DICOM_TAG_NUMBER_OF_TEMPORAL_POSITIONS);
     result.Remove(DICOM_TAG_NUMBER_OF_TIME_SLICES);
+    result.Remove(DICOM_TAG_IMAGE_ORIENTATION_PATIENT);
   }
 
   void DicomMap::SetupFindInstanceTemplate(DicomMap& result)

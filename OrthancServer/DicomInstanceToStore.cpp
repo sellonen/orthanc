@@ -109,7 +109,10 @@ namespace Orthanc
     if (!json_.HasContent())
     {
       json_.Allocate();
-      FromDcmtkBridge::ToJson(json_.GetContent(), GetDataset(parsed_.GetContent()));
+      FromDcmtkBridge::ToJson(json_.GetContent(), GetDataset(parsed_.GetContent()), 
+                              DicomToJsonFormat_Full, 
+                              DicomToJsonFlags_Default,
+                              256 /* max string length */);
     }
   }
 
