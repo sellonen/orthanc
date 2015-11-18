@@ -40,10 +40,13 @@
 #include "ServerIndexChange.h"
 #include "EmbeddedResources.h"
 #include "OrthancInitialization.h"
+#include "ServerToolbox.h"
 #include "../Core/Toolbox.h"
 #include "../Core/Logging.h"
 #include "../Core/Uuid.h"
 #include "../Core/DicomFormat/DicomArray.h"
+#include "Search/LookupIdentifierQuery.h"
+#include "Search/LookupResource.h"
 
 #include "FromDcmtkBridge.h"
 #include "ServerContext.h"
@@ -393,8 +396,8 @@ namespace Orthanc
           (value2 = dicomSummary.TestAndGetValue(DICOM_TAG_NUMBER_OF_TEMPORAL_POSITIONS)) != NULL)
       {
         // Patch for series with temporal positions thanks to Will Ryder
-        int64_t imagesInAcquisition = boost::lexical_cast<int64_t>(value->AsString());
-        int64_t countTemporalPositions = boost::lexical_cast<int64_t>(value2->AsString());
+        int64_t imagesInAcquisition = boost::lexical_cast<int64_t>(value->GetContent());
+        int64_t countTemporalPositions = boost::lexical_cast<int64_t>(value2->GetContent());
         std::string expected = boost::lexical_cast<std::string>(imagesInAcquisition * countTemporalPositions);
         db.SetMetadata(series, MetadataType_Series_ExpectedNumberOfInstances, expected);
       }
@@ -403,18 +406,21 @@ namespace Orthanc
                (value2 = dicomSummary.TestAndGetValue(DICOM_TAG_NUMBER_OF_TIME_SLICES)) != NULL)
       {
         // Support of Cardio-PET images
-        int64_t numberOfSlices = boost::lexical_cast<int64_t>(value->AsString());
-        int64_t numberOfTimeSlices = boost::lexical_cast<int64_t>(value2->AsString());
+        int64_t numberOfSlices = boost::lexical_cast<int64_t>(value->GetContent());
+        int64_t numberOfTimeSlices = boost::lexical_cast<int64_t>(value2->GetContent());
         std::string expected = boost::lexical_cast<std::string>(numberOfSlices * numberOfTimeSlices);
         db.SetMetadata(series, MetadataType_Series_ExpectedNumberOfInstances, expected);
       }
 
       else if ((value = dicomSummary.TestAndGetValue(DICOM_TAG_CARDIAC_NUMBER_OF_IMAGES)) != NULL)
       {
-        db.SetMetadata(series, MetadataType_Series_ExpectedNumberOfInstances, value->AsString());
+        db.SetMetadata(series, MetadataType_Series_ExpectedNumberOfInstances, value->GetContent());
       }
     }
-    catch (boost::bad_lexical_cast)
+    catch (OrthancException&)
+    {
+    }
+    catch (boost::bad_lexical_cast&)
     {
     }
   }
@@ -488,18 +494,6 @@ namespace Orthanc
     }
   }
 
-
-
-  void ServerIndex::SetMainDicomTags(int64_t resource,
-                                     const DicomMap& tags)
-  {
-    DicomArray flattened(tags);
-    for (size_t i = 0; i < flattened.GetSize(); i++)
-    {
-      const DicomElement& element = flattened.GetElement(i);
-      db_.SetMainDicomTag(resource, element.GetTag(), element.GetValue().AsString());
-    }
-  }
 
 
   int64_t ServerIndex::CreateResource(const std::string& publicId,
@@ -638,10 +632,7 @@ namespace Orthanc
 
       // Create the instance
       int64_t instance = CreateResource(hasher.HashInstance(), ResourceType_Instance);
-
-      DicomMap dicom;
-      dicomSummary.ExtractInstanceInformation(dicom);
-      SetMainDicomTags(instance, dicom);
+      Toolbox::SetMainDicomTags(db_, instance, ResourceType_Instance, dicomSummary);
 
       // Detect up to which level the patient/study/series/instance
       // hierarchy must be created
@@ -693,24 +684,21 @@ namespace Orthanc
       if (isNewSeries)
       {
         series = CreateResource(hasher.HashSeries(), ResourceType_Series);
-        dicomSummary.ExtractSeriesInformation(dicom);
-        SetMainDicomTags(series, dicom);
+        Toolbox::SetMainDicomTags(db_, series, ResourceType_Series, dicomSummary);
       }
 
       // Create the study if needed
       if (isNewStudy)
       {
         study = CreateResource(hasher.HashStudy(), ResourceType_Study);
-        dicomSummary.ExtractStudyInformation(dicom);
-        SetMainDicomTags(study, dicom);
+        Toolbox::SetMainDicomTags(db_, study, ResourceType_Study, dicomSummary);
       }
 
       // Create the patient if needed
       if (isNewPatient)
       {
         patient = CreateResource(hasher.HashPatient(), ResourceType_Patient);
-        dicomSummary.ExtractPatientInformation(dicom);
-        SetMainDicomTags(patient, dicom);
+        Toolbox::SetMainDicomTags(db_, patient, ResourceType_Patient, dicomSummary);
       }
 
       // Create the parent-to-child links
@@ -785,8 +773,12 @@ namespace Orthanc
       if ((value = dicomSummary.TestAndGetValue(DICOM_TAG_INSTANCE_NUMBER)) != NULL ||
           (value = dicomSummary.TestAndGetValue(DICOM_TAG_IMAGE_INDEX)) != NULL)
       {
-        db_.SetMetadata(instance, MetadataType_Instance_IndexInSeries, value->AsString());
-        instanceMetadata[MetadataType_Instance_IndexInSeries] = value->AsString();
+        if (!value->IsNull() && 
+            !value->IsBinary())
+        {
+          db_.SetMetadata(instance, MetadataType_Instance_IndexInSeries, value->GetContent());
+          instanceMetadata[MetadataType_Instance_IndexInSeries] = value->GetContent();
+        }
       }
 
       // Check whether the series of this new instance is now completed
@@ -890,14 +882,30 @@ namespace Orthanc
   }
 
 
-
   void ServerIndex::MainDicomTagsToJson(Json::Value& target,
-                                        int64_t resourceId)
+                                        int64_t resourceId,
+                                        ResourceType resourceType)
   {
     DicomMap tags;
     db_.GetMainDicomTags(tags, resourceId);
-    target["MainDicomTags"] = Json::objectValue;
-    FromDcmtkBridge::ToJson(target["MainDicomTags"], tags, true);
+
+    if (resourceType == ResourceType_Study)
+    {
+      DicomMap t1, t2;
+      tags.ExtractStudyInformation(t1);
+      tags.ExtractPatientInformation(t2);
+
+      target["MainDicomTags"] = Json::objectValue;
+      FromDcmtkBridge::ToJson(target["MainDicomTags"], t1, true);
+
+      target["PatientMainDicomTags"] = Json::objectValue;
+      FromDcmtkBridge::ToJson(target["PatientMainDicomTags"], t2, true);
+    }
+    else
+    {
+      target["MainDicomTags"] = Json::objectValue;
+      FromDcmtkBridge::ToJson(target["MainDicomTags"], tags, true);
+    }
   }
 
   bool ServerIndex::LookupResource(Json::Value& result,
@@ -1033,7 +1041,7 @@ namespace Orthanc
 
     // Record the remaining information
     result["ID"] = publicId;
-    MainDicomTagsToJson(result, id);
+    MainDicomTagsToJson(result, id, type);
 
     std::string tmp;
 
@@ -1198,22 +1206,22 @@ namespace Orthanc
       switch (currentType)
       {
         case ResourceType_Patient:
-          patientId = map.GetValue(DICOM_TAG_PATIENT_ID).AsString();
+          patientId = map.GetValue(DICOM_TAG_PATIENT_ID).GetContent();
           done = true;
           break;
 
         case ResourceType_Study:
-          studyInstanceUid = map.GetValue(DICOM_TAG_STUDY_INSTANCE_UID).AsString();
+          studyInstanceUid = map.GetValue(DICOM_TAG_STUDY_INSTANCE_UID).GetContent();
           currentType = ResourceType_Patient;
           break;
 
         case ResourceType_Series:
-          seriesInstanceUid = map.GetValue(DICOM_TAG_SERIES_INSTANCE_UID).AsString();
+          seriesInstanceUid = map.GetValue(DICOM_TAG_SERIES_INSTANCE_UID).GetContent();
           currentType = ResourceType_Study;
           break;
 
         case ResourceType_Instance:
-          sopInstanceUid = map.GetValue(DICOM_TAG_SOP_INSTANCE_UID).AsString();
+          sopInstanceUid = map.GetValue(DICOM_TAG_SOP_INSTANCE_UID).GetContent();
           currentType = ResourceType_Series;
           break;
 
@@ -1517,6 +1525,7 @@ namespace Orthanc
                                 const std::string& value)
   {
     boost::mutex::scoped_lock lock(mutex_);
+    Transaction t(*this);
 
     ResourceType rtype;
     int64_t id;
@@ -1526,6 +1535,13 @@ namespace Orthanc
     }
 
     db_.SetMetadata(id, type, value);
+
+    if (IsUserMetadata(type))
+    {
+      LogChange(id, ChangeType_UpdatedMetadata, rtype, publicId);
+    }
+
+    t.Commit(0);
   }
 
 
@@ -1533,6 +1549,7 @@ namespace Orthanc
                                    MetadataType type)
   {
     boost::mutex::scoped_lock lock(mutex_);
+    Transaction t(*this);
 
     ResourceType rtype;
     int64_t id;
@@ -1542,6 +1559,13 @@ namespace Orthanc
     }
 
     db_.DeleteMetadata(id, type);
+
+    if (IsUserMetadata(type))
+    {
+      LogChange(id, ChangeType_UpdatedMetadata, rtype, publicId);
+    }
+
+    t.Commit(0);
   }
 
 
@@ -1889,64 +1913,24 @@ namespace Orthanc
 
 
 
-  void ServerIndex::LookupIdentifier(std::list<std::string>& result,
-                                     const DicomTag& tag,
-                                     const std::string& value,
-                                     ResourceType type)
+  void ServerIndex::LookupIdentifierExact(std::list<std::string>& result,
+                                          ResourceType level,
+                                          const DicomTag& tag,
+                                          const std::string& value)
   {
+    assert((level == ResourceType_Patient && tag == DICOM_TAG_PATIENT_ID) ||
+           (level == ResourceType_Study && tag == DICOM_TAG_STUDY_INSTANCE_UID) ||
+           (level == ResourceType_Study && tag == DICOM_TAG_ACCESSION_NUMBER) ||
+           (level == ResourceType_Series && tag == DICOM_TAG_SERIES_INSTANCE_UID) ||
+           (level == ResourceType_Instance && tag == DICOM_TAG_SOP_INSTANCE_UID));
+    
     result.clear();
 
     boost::mutex::scoped_lock lock(mutex_);
 
-    std::list<int64_t> id;
-    db_.LookupIdentifier(id, tag, value);
-
-    for (std::list<int64_t>::const_iterator 
-           it = id.begin(); it != id.end(); ++it)
-    {
-      if (db_.GetResourceType(*it) == type)
-      {
-        result.push_back(db_.GetPublicId(*it));
-      }
-    }
-  }
-
-
-  void ServerIndex::LookupIdentifier(std::list<std::string>& result,
-                                     const DicomTag& tag,
-                                     const std::string& value)
-  {
-    result.clear();
-
-    boost::mutex::scoped_lock lock(mutex_);
-
-    std::list<int64_t> id;
-    db_.LookupIdentifier(id, tag, value);
-
-    for (std::list<int64_t>::const_iterator 
-           it = id.begin(); it != id.end(); ++it)
-    {
-      result.push_back(db_.GetPublicId(*it));
-    }
-  }
-
-
-  void ServerIndex::LookupIdentifier(std::list< std::pair<ResourceType, std::string> >& result,
-                                     const std::string& value)
-  {
-    result.clear();
-
-    boost::mutex::scoped_lock lock(mutex_);
-
-    std::list<int64_t> id;
-    db_.LookupIdentifier(id, value);
-
-    for (std::list<int64_t>::const_iterator 
-           it = id.begin(); it != id.end(); ++it)
-    {
-      result.push_back(std::make_pair(db_.GetResourceType(*it),
-                                      db_.GetPublicId(*it)));
-    }
+    LookupIdentifierQuery query(level);
+    query.AddConstraint(tag, IdentifierConstraintType_Equal, value);
+    query.Apply(result, db_);
   }
 
 
@@ -1990,6 +1974,11 @@ namespace Orthanc
 
     db_.AddAttachment(resourceId, attachment);
 
+    if (IsUserContentType(attachment.GetContentType()))
+    {
+      LogChange(resourceId, ChangeType_UpdatedAttachment, resourceType, publicId);
+    }
+
     t.Commit(attachment.GetCompressedSize());
 
     return StoreStatus_Success;
@@ -2010,6 +1999,11 @@ namespace Orthanc
     }
 
     db_.DeleteAttachment(id, type);
+
+    if (IsUserContentType(type))
+    {
+      LogChange(id, ChangeType_UpdatedAttachment, rtype, publicId);
+    }
 
     t.Commit(0);
   }
@@ -2077,8 +2071,19 @@ namespace Orthanc
 
   bool ServerIndex::GetMainDicomTags(DicomMap& result,
                                      const std::string& publicId,
-                                     ResourceType expectedType)
+                                     ResourceType expectedType,
+                                     ResourceType levelOfInterest)
   {
+    // Yes, the following test could be shortened, but we wish to make it as clear as possible
+    if (!(expectedType == ResourceType_Patient  && levelOfInterest == ResourceType_Patient) &&
+        !(expectedType == ResourceType_Study    && levelOfInterest == ResourceType_Patient) &&
+        !(expectedType == ResourceType_Study    && levelOfInterest == ResourceType_Study)   &&
+        !(expectedType == ResourceType_Series   && levelOfInterest == ResourceType_Series)  &&
+        !(expectedType == ResourceType_Instance && levelOfInterest == ResourceType_Instance))
+    {
+      throw OrthancException(ErrorCode_ParameterOutOfRange);
+    }
+
     result.Clear();
 
     boost::mutex::scoped_lock lock(mutex_);
@@ -2090,6 +2095,26 @@ namespace Orthanc
         type != expectedType)
     {
       return false;
+    }
+
+    if (type == ResourceType_Study)
+    {
+      DicomMap tmp;
+      db_.GetMainDicomTags(tmp, id);
+
+      switch (levelOfInterest)
+      {
+        case ResourceType_Patient:
+          tmp.ExtractPatientInformation(result);
+          return true;
+
+        case ResourceType_Study:
+          tmp.ExtractStudyInformation(result);
+          return true;
+
+        default:
+          throw OrthancException(ErrorCode_InternalError);
+      }
     }
     else
     {
@@ -2108,4 +2133,40 @@ namespace Orthanc
     return db_.LookupResource(id, type, publicId);
   }
 
+
+  unsigned int ServerIndex::GetDatabaseVersion()
+  {
+    boost::mutex::scoped_lock lock(mutex_);
+    return db_.GetDatabaseVersion();
+  }
+
+
+  void ServerIndex::FindCandidates(std::vector<std::string>& resources,
+                                   std::vector<std::string>& instances,
+                                   const ::Orthanc::LookupResource& lookup)
+  {
+    boost::mutex::scoped_lock lock(mutex_);
+   
+    std::list<int64_t> tmp;
+    lookup.FindCandidates(tmp, db_);
+
+    resources.resize(tmp.size());
+    instances.resize(tmp.size());
+
+    size_t pos = 0;
+    for (std::list<int64_t>::const_iterator
+           it = tmp.begin(); it != tmp.end(); ++it, pos++)
+    {
+      assert(db_.GetResourceType(*it) == lookup.GetLevel());
+      
+      int64_t instance;
+      if (!Toolbox::FindOneChildInstance(instance, db_, *it, lookup.GetLevel()))
+      {
+        throw OrthancException(ErrorCode_InternalError);
+      }
+
+      resources[pos] = db_.GetPublicId(*it);
+      instances[pos] = db_.GetPublicId(instance);
+    }
+  }
 }

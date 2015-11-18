@@ -190,17 +190,19 @@
    **/
 
   // Dictionary of symbolic names for the user-defined metadata. Each
-  // entry must map a number between 1024 and 65535 to an unique
-  // string.
+  // entry must map an unique string to an unique number between 1024
+  // and 65535.
   "UserMetadata" : {
     // "Sample" : 1024
   },
 
   // Dictionary of symbolic names for the user-defined types of
-  // attached files. Each entry must map a number between 1024 and
-  // 65535 to an unique string.
+  // attached files. Each entry must map an unique string to an unique
+  // number between 1024 and 65535. Optionally, a second argument can
+  // provided to specify a MIME content type for the attachment.
   "UserContentType" : {
     // "sample" : 1024
+    // "sample2" : [ 1025, "application/pdf" ]
   },
 
   // Number of seconds without receiving any instance before a
@@ -243,7 +245,8 @@
   "KeepAlive" : false,
 
   // If this option is set to "false", Orthanc will run in index-only
-  // mode. The DICOM files will not be stored on the drive.
+  // mode. The DICOM files will not be stored on the drive. Note that
+  // this option might prevent the upgrade to newer versions of Orthanc.
   "StoreDicom" : true,
 
   // DICOM associations are kept open as long as new DICOM commands
@@ -257,8 +260,19 @@
   // deleted as new requests are issued.
   "QueryRetrieveSize" : 10,
 
-  // When handling a C-Find SCP request, setting this flag to "false"
-  // will enable case-insensitive match for PN value representation
-  // (such as PatientName). By default, the search is case-insensitive.
-  "CaseSensitivePN" : false
+  // When handling a C-Find SCP request, setting this flag to "true"
+  // will enable case-sensitive match for PN value representation
+  // (such as PatientName). By default, the search is
+  // case-insensitive, which does not follow the DICOM standard.
+  "CaseSensitivePN" : false,
+  
+  // Register a new tag in the dictionary of DICOM tags that are known
+  // to Orthanc. Each line must contain the tag (formatted as 2
+  // hexadecimal numbers), the value representation (2 upcase
+  // characters), a nickname for the tag, possibly the minimum
+  // multiplicity (> 0 with defaults to 1), and possibly the maximum
+  // multiplicity (0 means arbitrary multiplicity, defaults to 1).
+  "Dictionary" : {
+    // "0014,1020" : [ "DA", "ValidationExpiryDate", 1, 1 ]
+  }
 }

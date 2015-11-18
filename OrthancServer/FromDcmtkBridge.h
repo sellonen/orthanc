@@ -44,6 +44,14 @@ namespace Orthanc
   class FromDcmtkBridge
   {
   public:
+    static void InitializeDictionary();
+
+    static void RegisterDictionaryTag(const DicomTag& tag,
+                                      const DcmEVR& vr,
+                                      const std::string& name,
+                                      unsigned int minMultiplicity,
+                                      unsigned int maxMultiplicity);
+
     static Encoding DetectEncoding(DcmDataset& dataset);
 
     static void Convert(DicomMap& target, DcmDataset& dataset);
@@ -52,20 +60,26 @@ namespace Orthanc
 
     static DicomTag GetTag(const DcmElement& element);
 
-    static bool IsPrivateTag(DcmTag& tag);
-
     static bool IsPrivateTag(const DicomTag& tag);
 
+    static bool IsUnknownTag(const DicomTag& tag);
+
     static DicomValue* ConvertLeafElement(DcmElement& element,
+                                          DicomToJsonFlags flags,
                                           Encoding encoding);
+
+    static void ToJson(Json::Value& parent,
+                       DcmElement& element,
+                       DicomToJsonFormat format,
+                       DicomToJsonFlags flags,
+                       unsigned int maxStringLength,
+                       Encoding dicomEncoding);
 
     static void ToJson(Json::Value& target, 
                        DcmDataset& dataset,
-                       unsigned int maxStringLength = 256);       
-
-    static void ToJson(Json::Value& target, 
-                       const std::string& path,
-                       unsigned int maxStringLength = 256);
+                       DicomToJsonFormat format,
+                       DicomToJsonFlags flags,
+                       unsigned int maxStringLength);
 
     static std::string GetName(const DicomTag& tag);
 
@@ -95,9 +109,6 @@ namespace Orthanc
       target.SetValue(ParseTag(tagName), value);
     }
 
-    static void Print(FILE* fp, 
-                      const DicomMap& m);
-
     static void ToJson(Json::Value& result,
                        const DicomMap& values,
                        bool simplify);
@@ -108,5 +119,20 @@ namespace Orthanc
                                    DcmDataset& dataSet);
 
     static ValueRepresentation GetValueRepresentation(const DicomTag& tag);
+
+    static DcmElement* CreateElementForTag(const DicomTag& tag);
+    
+    static void FillElementWithString(DcmElement& element,
+                                      const DicomTag& tag,
+                                      const std::string& utf8alue,  // Encoded using UTF-8
+                                      bool interpretBinaryTags,
+                                      Encoding dicomEncoding);
+
+    static DcmElement* FromJson(const DicomTag& tag,
+                                const Json::Value& element,  // Encoding using UTF-8
+                                bool interpretBinaryTags,
+                                Encoding dicomEncoding);
+
+    static DcmEVR ParseValueRepresentation(const std::string& s);
   };
 }

@@ -40,6 +40,7 @@
 #include "../OrthancInitialization.h"
 
 #include <boost/lexical_cast.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 
 namespace Orthanc
 {
@@ -97,12 +98,13 @@ namespace Orthanc
     for (size_t i = 0; i < members.size(); i++)
     {
       const std::string& name = members[i];
-      std::string value = replacements[name].asString();
+      const Json::Value& value = replacements[name];
 
       DicomTag tag = FromDcmtkBridge::ParseTag(name);
       target.Replace(tag, value);
 
-      VLOG(1) << "Replace: " << name << " " << tag << " == " << value << std::endl;
+      VLOG(1) << "Replace: " << name << " " << tag 
+              << " == " << value.toStyledString() << std::endl;
     }
   }
 
@@ -167,7 +169,7 @@ namespace Orthanc
     // curl http://localhost:8042/instances/6e67da51-d119d6ae-c5667437-87b9a8a5-0f07c49f/anonymize -X POST -d '{"Replace":{"PatientName":"hello","0010-0020":"world"},"Keep":["StudyDescription", "SeriesDescription"],"KeepPrivateTags": null,"Remove":["Modality"]}' > Anonymized.dcm
 
     target.SetupAnonymization();
-    std::string patientName = target.GetReplacement(DICOM_TAG_PATIENT_NAME);
+    std::string patientName = target.GetReplacementAsString(DICOM_TAG_PATIENT_NAME);
 
     Json::Value request;
     if (call.ParseJsonRequest(request) && request.isObject())
@@ -485,7 +487,8 @@ namespace Orthanc
 
 
   static void InjectTags(ParsedDicomFile& dicom,
-                         const Json::Value& tags)
+                         const Json::Value& tags,
+                         bool decodeBinaryTags)
   {
     if (tags.type() != Json::objectValue)
     {
@@ -497,17 +500,21 @@ namespace Orthanc
     for (size_t i = 0; i < members.size(); i++)
     {
       const std::string& name = members[i];
-      if (tags[name].type() != Json::stringValue)
-      {
-        throw OrthancException(ErrorCode_CreateDicomNotString);
-      }
-
-      std::string value = tags[name].asString();
-
       DicomTag tag = FromDcmtkBridge::ParseTag(name);
+
       if (tag != DICOM_TAG_SPECIFIC_CHARACTER_SET)
       {
         if (tag != DICOM_TAG_PATIENT_ID &&
+            tag != DICOM_TAG_ACQUISITION_DATE &&
+            tag != DICOM_TAG_ACQUISITION_TIME &&
+            tag != DICOM_TAG_CONTENT_DATE &&
+            tag != DICOM_TAG_CONTENT_TIME &&
+            tag != DICOM_TAG_INSTANCE_CREATION_DATE &&
+            tag != DICOM_TAG_INSTANCE_CREATION_TIME &&
+            tag != DICOM_TAG_SERIES_DATE &&
+            tag != DICOM_TAG_SERIES_TIME &&
+            tag != DICOM_TAG_STUDY_DATE &&
+            tag != DICOM_TAG_STUDY_TIME &&
             dicom.HasTag(tag))
         {
           throw OrthancException(ErrorCode_CreateDicomOverrideTag);
@@ -519,7 +526,7 @@ namespace Orthanc
         }
         else
         {
-          dicom.Replace(tag, Toolbox::ConvertFromUtf8(value, dicom.GetEncoding()));
+          dicom.Replace(tag, tags[name], decodeBinaryTags);
         }
       }
     }
@@ -528,7 +535,8 @@ namespace Orthanc
 
   static void CreateSeries(RestApiPostCall& call,
                            ParsedDicomFile& base /* in */,
-                           const Json::Value& content)
+                           const Json::Value& content,
+                           bool decodeBinaryTags)
   {
     assert(content.isArray());
     assert(content.size() > 0);
@@ -561,7 +569,7 @@ namespace Orthanc
 
           if (content[i].isMember("Tags"))
           {
-            InjectTags(*dicom, content[i]["Tags"]);
+            InjectTags(*dicom, content[i]["Tags"], decodeBinaryTags);
           }
         }
 
@@ -734,6 +742,19 @@ namespace Orthanc
       }
     }
 
+
+    bool decodeBinaryTags = true;
+    if (request.isMember("InterpretBinaryTags"))
+    {
+      const Json::Value& v = request["InterpretBinaryTags"];
+      if (v.type() != Json::booleanValue)
+      {
+        throw OrthancException(ErrorCode_BadRequest);
+      }
+
+      decodeBinaryTags = v.asBool();
+    }
+
     
     // Inject time-related information
     std::string date, time;
@@ -761,7 +782,7 @@ namespace Orthanc
     }
 
 
-    InjectTags(dicom, request["Tags"]);
+    InjectTags(dicom, request["Tags"], decodeBinaryTags);
 
 
     // Inject the content (either an image, or a PDF file)
@@ -779,7 +800,7 @@ namespace Orthanc
         if (content.size() > 0)
         {
           // Let's create a series instead of a single instance
-          CreateSeries(call, dicom, content);
+          CreateSeries(call, dicom, content, decodeBinaryTags);
           return;
         }
       }

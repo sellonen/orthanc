@@ -33,14 +33,12 @@
 #include "PrecompiledHeadersServer.h"
 #include "OrthancFindRequestHandler.h"
 
-#include "../Core/Logging.h"
 #include "../Core/DicomFormat/DicomArray.h"
-#include "ServerToolbox.h"
-#include "OrthancInitialization.h"
+#include "../Core/Logging.h"
 #include "FromDcmtkBridge.h"
-
-#include "ResourceFinder.h"
-#include "DicomFindQuery.h"
+#include "OrthancInitialization.h"
+#include "Search/LookupResource.h"
+#include "ServerToolbox.h"
 
 #include <boost/regex.hpp> 
 
@@ -90,130 +88,6 @@ namespace Orthanc
   }
 
 
-  namespace
-  {
-    class CFindQuery : public DicomFindQuery
-    {
-    private:
-      DicomFindAnswers&      answers_;
-      ServerIndex&           index_;
-      const DicomArray&      query_;
-      bool                   hasModalitiesInStudy_;
-      std::set<std::string>  modalitiesInStudy_;
-
-    public:
-      CFindQuery(DicomFindAnswers& answers,
-                 ServerIndex& index,
-                 const DicomArray& query) :
-        answers_(answers),
-        index_(index),
-        query_(query),
-        hasModalitiesInStudy_(false)
-      {
-      }
-
-      void SetModalitiesInStudy(const std::string& value)
-      {
-        hasModalitiesInStudy_ = true;
-        
-        std::vector<std::string>  tmp;
-        Toolbox::TokenizeString(tmp, value, '\\'); 
-
-        for (size_t i = 0; i < tmp.size(); i++)
-        {
-          modalitiesInStudy_.insert(tmp[i]);
-        }
-      }
-
-      virtual bool HasMainDicomTagsFilter(ResourceType level) const
-      {
-        if (DicomFindQuery::HasMainDicomTagsFilter(level))
-        {
-          return true;
-        }
-
-        return (level == ResourceType_Study &&
-                hasModalitiesInStudy_);
-      }
-
-      virtual bool FilterMainDicomTags(const std::string& resourceId,
-                                       ResourceType level,
-                                       const DicomMap& mainTags) const
-      {
-        if (!DicomFindQuery::FilterMainDicomTags(resourceId, level, mainTags))
-        {
-          return false;
-        }
-
-        if (level != ResourceType_Study ||
-            !hasModalitiesInStudy_)
-        {
-          return true;
-        }
-
-        try
-        {
-          // We are considering a single study, and the
-          // "MODALITIES_IN_STUDY" tag is set in the C-Find. Check
-          // whether one of its child series matches one of the
-          // modalities.
-
-          Json::Value study;
-          if (index_.LookupResource(study, resourceId, ResourceType_Study))
-          {
-            // Loop over the series of the considered study.
-            for (Json::Value::ArrayIndex j = 0; j < study["Series"].size(); j++)
-            {
-              Json::Value series;
-              if (index_.LookupResource(series, study["Series"][j].asString(), ResourceType_Series))
-              {
-                // Get the modality of this series
-                if (series["MainDicomTags"].isMember("Modality"))
-                {
-                  std::string modality = series["MainDicomTags"]["Modality"].asString();
-                  if (modalitiesInStudy_.find(modality) != modalitiesInStudy_.end())
-                  {
-                    // This series of the considered study matches one
-                    // of the required modalities. Take the study into
-                    // consideration for future filtering.
-                    return true;
-                  }
-                }
-              }
-            }
-          }
-        }
-        catch (OrthancException&)
-        {
-          // This resource has probably been deleted during the find request
-        }
-
-        return false;
-      }
-
-      virtual bool HasInstanceFilter() const
-      {
-        return true;
-      }
-
-      virtual bool FilterInstance(const std::string& instanceId,
-                                  const Json::Value& content) const
-      {
-        bool ok = DicomFindQuery::FilterInstance(instanceId, content);
-
-        if (ok)
-        {
-          // Add this resource to the answers
-          AddAnswer(answers_, content, query_);
-        }
-
-        return ok;
-      }
-    };
-  }
-
-
-
   bool OrthancFindRequestHandler::Handle(DicomFindAnswers& answers,
                                          const DicomMap& input,
                                          const std::string& remoteIp,
@@ -240,12 +114,14 @@ namespace Orthanc
      **/
 
     const DicomValue* levelTmp = input.TestAndGetValue(DICOM_TAG_QUERY_RETRIEVE_LEVEL);
-    if (levelTmp == NULL) 
+    if (levelTmp == NULL ||
+        levelTmp->IsNull() ||
+        levelTmp->IsBinary())
     {
       throw OrthancException(ErrorCode_BadRequest);
     }
 
-    ResourceType level = StringToResourceType(levelTmp->AsString().c_str());
+    ResourceType level = StringToResourceType(levelTmp->GetContent().c_str());
 
     if (level != ResourceType_Patient &&
         level != ResourceType_Study &&
@@ -265,7 +141,7 @@ namespace Orthanc
       {
         LOG(INFO) << "  " << query.GetElement(i).GetTag()
                   << "  " << FromDcmtkBridge::GetName(query.GetElement(i).GetTag())
-                  << " = " << query.GetElement(i).GetValue().AsString();
+                  << " = " << query.GetElement(i).GetValue().GetContent();
       }
     }
 
@@ -274,9 +150,8 @@ namespace Orthanc
      * Build up the query object.
      **/
 
-    CFindQuery findQuery(answers, context_.GetIndex(), query);
-    findQuery.SetLevel(level);
-        
+    LookupResource finder(level);
+
     for (size_t i = 0; i < query.GetSize(); i++)
     {
       const DicomTag tag = query.GetElement(i).GetTag();
@@ -288,21 +163,24 @@ namespace Orthanc
         continue;
       }
 
-      std::string value = query.GetElement(i).GetValue().AsString();
+      std::string value = query.GetElement(i).GetValue().GetContent();
       if (value.size() == 0)
       {
         // An empty string corresponds to a "*" wildcard constraint, so we ignore it
         continue;
       }
 
-      if (tag == DICOM_TAG_MODALITIES_IN_STUDY)
+      ValueRepresentation vr = FromDcmtkBridge::GetValueRepresentation(tag);
+
+      // DICOM specifies that searches must be case sensitive, except
+      // for tags with a PN value representation
+      bool sensitive = true;
+      if (vr == ValueRepresentation_PatientName)
       {
-        findQuery.SetModalitiesInStudy(value);
+        sensitive = caseSensitivePN;
       }
-      else
-      {
-        findQuery.SetConstraint(tag, value, caseSensitivePN);
-      }
+
+      finder.AddDicomConstraint(tag, value, sensitive);
     }
 
 
@@ -310,28 +188,35 @@ namespace Orthanc
      * Run the query.
      **/
 
-    ResourceFinder finder(context_);
+    size_t maxResults = (level == ResourceType_Instance) ? maxInstances_ : maxResults_;
 
-    switch (level)
+    std::vector<std::string> resources, instances;
+    context_.GetIndex().FindCandidates(resources, instances, finder);
+
+    assert(resources.size() == instances.size());
+    bool finished = true;
+
+    for (size_t i = 0; i < instances.size(); i++)
     {
-      case ResourceType_Patient:
-      case ResourceType_Study:
-      case ResourceType_Series:
-        finder.SetMaxResults(maxResults_);
-        break;
-
-      case ResourceType_Instance:
-        finder.SetMaxResults(maxInstances_);
-        break;
-
-      default:
-        throw OrthancException(ErrorCode_InternalError);
+      Json::Value dicom;
+      context_.ReadJson(dicom, instances[i]);
+      
+      if (finder.IsMatch(dicom))
+      {
+        if (maxResults != 0 &&
+            answers.GetSize() >= maxResults)
+        {
+          finished = false;
+          break;
+        }
+        else
+        {
+          AddAnswer(answers, dicom, query);
+        }
+      }
     }
 
-    std::list<std::string> tmp;
-    bool finished = finder.Apply(tmp, findQuery);
-
-    LOG(INFO) << "Number of matching resources: " << tmp.size();
+    LOG(INFO) << "Number of matching resources: " << answers.GetSize();
 
     return finished;
   }

@@ -86,8 +86,6 @@ namespace Orthanc
 
     static void AddTagsForModule(std::set<DicomTag>& target,
                                  DicomModule module);
-
-    bool IsIdentifier() const;
   };
 
   // Aliases for the most useful tags
@@ -108,6 +106,10 @@ namespace Orthanc
   static const DicomTag DICOM_TAG_IMAGES_IN_ACQUISITION(0x0020, 0x1002);
   static const DicomTag DICOM_TAG_PATIENT_NAME(0x0010, 0x0010);
   static const DicomTag DICOM_TAG_ENCAPSULATED_DOCUMENT(0x0042, 0x0011);
+
+  static const DicomTag DICOM_TAG_STUDY_DESCRIPTION(0x0008, 0x1030);
+  static const DicomTag DICOM_TAG_SERIES_DESCRIPTION(0x0008, 0x103e);
+  static const DicomTag DICOM_TAG_MODALITY(0x0008, 0x0060);
 
   // The following is used for "modify/anonymize" operations
   static const DicomTag DICOM_TAG_SOP_CLASS_UID(0x0008, 0x0016);
@@ -134,6 +136,8 @@ namespace Orthanc
   static const DicomTag DICOM_TAG_PIXEL_REPRESENTATION(0x0028, 0x0103);
   static const DicomTag DICOM_TAG_PLANAR_CONFIGURATION(0x0028, 0x0006);
   static const DicomTag DICOM_TAG_PHOTOMETRIC_INTERPRETATION(0x0028, 0x0004);
+  static const DicomTag DICOM_TAG_IMAGE_ORIENTATION_PATIENT(0x0020, 0x0037);
+  static const DicomTag DICOM_TAG_IMAGE_POSITION_PATIENT(0x0020, 0x0032);
 
   // Tags related to date and time
   static const DicomTag DICOM_TAG_ACQUISITION_DATE(0x0008, 0x0022);

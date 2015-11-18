@@ -77,6 +77,10 @@ namespace Orthanc
     ErrorCode_BadJson = 28    /*!< Cannot parse a JSON document */,
     ErrorCode_Unauthorized = 29    /*!< Bad credentials were provided to an HTTP request */,
     ErrorCode_BadFont = 30    /*!< Badly formatted font file */,
+    ErrorCode_DatabasePlugin = 31    /*!< The plugin implementing a custom database back-end does not fulfill the proper interface */,
+    ErrorCode_StorageAreaPlugin = 32    /*!< Error in the plugin implementing a custom storage area */,
+    ErrorCode_EmptyRequest = 33    /*!< The request is empty */,
+    ErrorCode_NotAcceptable = 34    /*!< Cannot send a response which is acceptable according to the Accept HTTP header */,
     ErrorCode_SQLiteNotOpened = 1000    /*!< SQLite: The database is not opened */,
     ErrorCode_SQLiteAlreadyOpened = 1001    /*!< SQLite: Connection is already open */,
     ErrorCode_SQLiteCannotOpen = 1002    /*!< SQLite: Unable to open the database */,
@@ -131,7 +135,10 @@ namespace Orthanc
     ErrorCode_LuaReturnsNoString = 2035    /*!< The Lua function does not return a string */,
     ErrorCode_StorageAreaAlreadyRegistered = 2036    /*!< Another plugin has already registered a custom storage area */,
     ErrorCode_DatabaseBackendAlreadyRegistered = 2037    /*!< Another plugin has already registered a custom database back-end */,
-    ErrorCode_DatabasePlugin = 2038    /*!< The plugin implementing a custom database back-end does not fulfill the proper interface */
+    ErrorCode_DatabaseNotInitialized = 2038    /*!< Plugin trying to call the database during its initialization */,
+    ErrorCode_SslDisabled = 2039    /*!< Orthanc has been built without SSL support */,
+    ErrorCode_CannotOrderSlices = 2040    /*!< Unable to order the slices of the series */,
+    ErrorCode_START_PLUGINS = 1000000
   };
 
   enum LogLevel
@@ -448,10 +455,6 @@ namespace Orthanc
   bool GetDicomEncoding(Encoding& encoding,
                         const char* specificCharacterSet);
 
-  const char* GetMimeType(FileContentType type);
-
-  const char* GetFileExtension(FileContentType type);
-
   ResourceType GetChildResourceType(ResourceType type);
 
   ResourceType GetParentResourceType(ResourceType type);
@@ -461,4 +464,6 @@ namespace Orthanc
   const char* GetDicomSpecificCharacterSet(Encoding encoding);
 
   HttpStatus ConvertErrorCodeToHttpStatus(ErrorCode error);
+
+  bool IsUserContentType(FileContentType type);
 }

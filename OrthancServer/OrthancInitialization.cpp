@@ -39,9 +39,9 @@
 #include "../Core/Toolbox.h"
 #include "../Core/FileStorage/FilesystemStorage.h"
 
-#include "DicomProtocol/DicomServer.h"
 #include "ServerEnumerations.h"
 #include "DatabaseWrapper.h"
+#include "FromDcmtkBridge.h"
 
 #include <boost/lexical_cast.hpp>
 #include <boost/filesystem.hpp>
@@ -252,24 +252,26 @@ namespace Orthanc
       Json::Value::Members members = parameter.getMemberNames();
       for (size_t i = 0; i < members.size(); i++)
       {
-        std::string info = "\"" + members[i] + "\" = " + parameter[members[i]].toStyledString();
-        LOG(INFO) << "Registering user-defined metadata: " << info;
+        const std::string& name = members[i];
 
-        if (!parameter[members[i]].asBool())
+        if (!parameter[name].isInt())
         {
-          LOG(ERROR) << "Not a number in this user-defined metadata: " << info;
+          LOG(ERROR) << "Not a number in this user-defined metadata: " << name;
           throw OrthancException(ErrorCode_BadParameterType);
         }
 
-        int metadata = parameter[members[i]].asInt();
+        int metadata = parameter[name].asInt();        
+
+        LOG(INFO) << "Registering user-defined metadata: " << name << " (index " 
+                  << metadata << ")";
 
         try
         {
-          RegisterUserMetadata(metadata, members[i]);
+          RegisterUserMetadata(metadata, name);
         }
         catch (OrthancException&)
         {
-          LOG(ERROR) << "Cannot register this user-defined metadata: " << info;
+          LOG(ERROR) << "Cannot register this user-defined metadata: " << name;
           throw;
         }
       }
@@ -286,29 +288,81 @@ namespace Orthanc
       Json::Value::Members members = parameter.getMemberNames();
       for (size_t i = 0; i < members.size(); i++)
       {
-        std::string info = "\"" + members[i] + "\" = " + parameter[members[i]].toStyledString();
-        LOG(INFO) << "Registering user-defined attachment type: " << info;
+        const std::string& name = members[i];
+        std::string mime = "application/octet-stream";
 
-        if (!parameter[members[i]].asBool())
+        const Json::Value& value = parameter[name];
+        int contentType;
+
+        if (value.isArray() &&
+            value.size() == 2 &&
+            value[0].isInt() &&
+            value[1].isString())
         {
-          LOG(ERROR) << "Not a number in this user-defined attachment type: " << info;
+          contentType = value[0].asInt();
+          mime = value[1].asString();
+        }
+        else if (value.isInt())
+        {
+          contentType = value.asInt();
+        }
+        else
+        {
+          LOG(ERROR) << "Not a number in this user-defined attachment type: " << name;
           throw OrthancException(ErrorCode_BadParameterType);
         }
 
-        int contentType = parameter[members[i]].asInt();
+        LOG(INFO) << "Registering user-defined attachment type: " << name << " (index " 
+                  << contentType << ") with MIME type \"" << mime << "\"";
 
         try
         {
-          RegisterUserContentType(contentType, members[i]);
+          RegisterUserContentType(contentType, name, mime);
         }
         catch (OrthancException&)
         {
-          LOG(ERROR) << "Cannot register this user-defined attachment type: " << info;
           throw;
         }
       }
     }
   }
+
+
+  static void LoadCustomDictionary(const Json::Value& configuration)
+  {
+    if (configuration.type() != Json::objectValue ||
+        !configuration.isMember("Dictionary") ||
+        configuration["Dictionary"].type() != Json::objectValue)
+    {
+      return;
+    }
+
+    Json::Value::Members tags(configuration["Dictionary"].getMemberNames());
+
+    for (Json::Value::ArrayIndex i = 0; i < tags.size(); i++)
+    {
+      const Json::Value& content = configuration["Dictionary"][tags[i]];
+      if (content.type() != Json::arrayValue ||
+          content.size() < 2 ||
+          content.size() > 4 ||
+          content[0].type() != Json::stringValue ||
+          content[1].type() != Json::stringValue ||
+          (content.size() >= 3 && content[2].type() != Json::intValue) ||
+          (content.size() >= 4 && content[3].type() != Json::intValue))
+      {
+        throw OrthancException(ErrorCode_BadFileFormat);
+      }
+
+      DicomTag tag(FromDcmtkBridge::ParseTag(tags[i]));
+      DcmEVR vr = FromDcmtkBridge::ParseValueRepresentation(content[0].asString());
+      std::string name = content[1].asString();
+      unsigned int minMultiplicity = (content.size() >= 2) ? content[2].asUInt() : 1;
+      unsigned int maxMultiplicity = (content.size() >= 3) ? content[3].asUInt() : 1;
+
+      FromDcmtkBridge::RegisterDictionaryTag(tag, vr, name, minMultiplicity, maxMultiplicity);
+    }
+  }
+
 
 
   void OrthancInitialize(const char* configurationFile)
@@ -338,7 +392,8 @@ namespace Orthanc
     RegisterUserMetadata();
     RegisterUserContentType();
 
-    DicomServer::InitializeDictionary();
+    FromDcmtkBridge::InitializeDictionary();
+    LoadCustomDictionary(configuration_);
 
 #if ORTHANC_JPEG_LOSSLESS_ENABLED == 1
     LOG(WARNING) << "Registering JPEG Lossless codecs";

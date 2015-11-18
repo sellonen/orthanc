@@ -45,6 +45,7 @@
 
 namespace Orthanc
 {
+  class LookupResource;
   class ServerContext;
 
   class ServerIndex : public boost::noncopyable
@@ -76,7 +77,8 @@ namespace Orthanc
     static void UnstableResourcesMonitorThread(ServerIndex* that);
 
     void MainDicomTagsToJson(Json::Value& result,
-                             int64_t resourceId);
+                             int64_t resourceId,
+                             ResourceType resourceType);
 
     SeriesStatus GetSeriesStatus(int64_t id);
 
@@ -109,9 +111,6 @@ namespace Orthanc
                    const std::string& publicId);
 
     uint64_t IncrementGlobalSequenceInternal(GlobalProperty property);
-
-    void SetMainDicomTags(int64_t resource,
-                          const DicomMap& tags);
 
     int64_t CreateResource(const std::string& publicId,
                            ResourceType type);
@@ -237,17 +236,10 @@ namespace Orthanc
                        /* out */ unsigned int& countInstances, 
                        const std::string& publicId);
 
-    void LookupIdentifier(std::list<std::string>& result,
-                          const DicomTag& tag,
-                          const std::string& value,
-                          ResourceType type);
-
-    void LookupIdentifier(std::list<std::string>& result,
-                          const DicomTag& tag,
-                          const std::string& value);
-
-    void LookupIdentifier(std::list< std::pair<ResourceType, std::string> >& result,
-                          const std::string& value);
+    void LookupIdentifierExact(std::list<std::string>& result,
+                               ResourceType level,
+                               const DicomTag& tag,
+                               const std::string& value);
 
     StoreStatus AddAttachment(const FileInfo& attachment,
                               const std::string& publicId);
@@ -263,9 +255,16 @@ namespace Orthanc
 
     bool GetMainDicomTags(DicomMap& result,
                           const std::string& publicId,
-                          ResourceType expectedType);
+                          ResourceType expectedType,
+                          ResourceType levelOfInterest);
 
     bool LookupResourceType(ResourceType& type,
                             const std::string& publicId);
+
+    unsigned int GetDatabaseVersion();
+
+    void FindCandidates(std::vector<std::string>& resources,
+                        std::vector<std::string>& instances,
+                        const ::Orthanc::LookupResource& lookup);
   };
 }

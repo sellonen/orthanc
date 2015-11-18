@@ -40,10 +40,9 @@
 #include "../Internals/CommandDispatcher.h"
 #include "../OrthancInitialization.h"
 #include "EmbeddedResources.h"
+#include "../../Core/MultiThreading/RunnableWorkersPool.h"
 
 #include <boost/thread.hpp>
-#include <boost/filesystem.hpp>
-#include <dcmtk/dcmdata/dcdict.h>
 
 #if defined(__linux)
 #include <cstdlib>
@@ -54,155 +53,37 @@ namespace Orthanc
 {
   struct DicomServer::PImpl
   {
-    boost::thread thread_;
-
-    //std::set<
+    boost::thread  thread_;
+    T_ASC_Network *network_;
+    std::auto_ptr<RunnableWorkersPool>  workers_;
   };
-
-
-#if DCMTK_USE_EMBEDDED_DICTIONARIES == 1
-  static void LoadEmbeddedDictionary(DcmDataDictionary& dictionary,
-                                     EmbeddedResources::FileResourceId resource)
-  {
-    Toolbox::TemporaryFile tmp;
-
-    FILE* fp = fopen(tmp.GetPath().c_str(), "wb");
-    fwrite(EmbeddedResources::GetFileResourceBuffer(resource), 
-           EmbeddedResources::GetFileResourceSize(resource), 1, fp);
-    fclose(fp);
-
-    if (!dictionary.loadDictionary(tmp.GetPath().c_str()))
-    {
-      throw OrthancException(ErrorCode_InternalError);
-    }
-  }
-                             
-#else
-  static void LoadExternalDictionary(DcmDataDictionary& dictionary,
-                                     const std::string& directory,
-                                     const std::string& filename)
-  {
-    boost::filesystem::path p = directory;
-    p = p / filename;
-
-    LOG(WARNING) << "Loading the external DICOM dictionary " << p;
-
-    if (!dictionary.loadDictionary(p.string().c_str()))
-    {
-      throw OrthancException(ErrorCode_InternalError);
-    }
-  }
-                            
-#endif
-
-
-  void DicomServer::InitializeDictionary()
-  {
-    /* Disable "gethostbyaddr" (which results in memory leaks) and use raw IP addresses */
-    dcmDisableGethostbyaddr.set(OFTrue);
-
-    dcmDataDict.clear();
-    DcmDataDictionary& d = dcmDataDict.wrlock();
-
-#if DCMTK_USE_EMBEDDED_DICTIONARIES == 1
-    LOG(WARNING) << "Loading the embedded dictionaries";
-    /**
-     * Do not load DICONDE dictionary, it breaks the other tags. The
-     * command "strace storescu 2>&1 |grep dic" shows that DICONDE
-     * dictionary is not loaded by storescu.
-     **/
-    //LoadEmbeddedDictionary(d, EmbeddedResources::DICTIONARY_DICONDE);
-
-    LoadEmbeddedDictionary(d, EmbeddedResources::DICTIONARY_DICOM);
-    LoadEmbeddedDictionary(d, EmbeddedResources::DICTIONARY_PRIVATE);
-
-#elif defined(__linux) || defined(__FreeBSD_kernel__)
-    std::string path = DCMTK_DICTIONARY_DIR;
-
-    const char* env = std::getenv(DCM_DICT_ENVIRONMENT_VARIABLE);
-    if (env != NULL)
-    {
-      path = std::string(env);
-    }
-
-    LoadExternalDictionary(d, path, "dicom.dic");
-    LoadExternalDictionary(d, path, "private.dic");
-
-#else
-#error Support your platform here
-#endif
-
-    dcmDataDict.unlock();
-
-    /* make sure data dictionary is loaded */
-    if (!dcmDataDict.isDictionaryLoaded())
-    {
-      LOG(ERROR) << "No DICOM dictionary loaded, check environment variable: " << DCM_DICT_ENVIRONMENT_VARIABLE;
-      throw OrthancException(ErrorCode_InternalError);
-    }
-
-    {
-      // Test the dictionary with a simple DICOM tag
-      DcmTag key(0x0010, 0x1030); // This is PatientWeight
-      if (key.getEVR() != EVR_DS)
-      {
-        LOG(ERROR) << "The DICOM dictionary has not been correctly read";
-        throw OrthancException(ErrorCode_InternalError);
-      }
-    }
-  }
 
 
   void DicomServer::ServerThread(DicomServer* server)
   {
-    /* initialize network, i.e. create an instance of T_ASC_Network*. */
-    T_ASC_Network *net;
-    OFCondition cond = ASC_initializeNetwork
-      (NET_ACCEPTOR, OFstatic_cast(int, server->port_), /*opt_acse_timeout*/ 30, &net);
-    if (cond.bad())
-    {
-      LOG(ERROR) << "cannot create network: " << cond.text();
-      throw OrthancException(ErrorCode_DicomPortInUse);
-    }
-
     LOG(INFO) << "DICOM server started";
-
-    server->started_ = true;
 
     while (server->continue_)
     {
       /* receive an association and acknowledge or reject it. If the association was */
       /* acknowledged, offer corresponding services and invoke one or more if required. */
-      std::auto_ptr<Internals::CommandDispatcher> dispatcher(Internals::AcceptAssociation(*server, net));
+      std::auto_ptr<Internals::CommandDispatcher> dispatcher(Internals::AcceptAssociation(*server, server->pimpl_->network_));
 
-      if (dispatcher.get() != NULL)
+      try
       {
-        if (server->isThreaded_)
+        if (dispatcher.get() != NULL)
         {
-          server->bagOfDispatchers_.Add(dispatcher.release());
+          server->pimpl_->workers_->Add(dispatcher.release());
         }
-        else
-        {
-          IRunnableBySteps::RunUntilDone(*dispatcher);
-        }
+      }
+      catch (OrthancException& e)
+      {
+        LOG(ERROR) << "Exception in the DICOM server thread: " << e.What();
       }
     }
 
     LOG(INFO) << "DICOM server stopping";
-
-    if (server->isThreaded_)
-    {
-      server->bagOfDispatchers_.StopAll();
-    }
-
-    /* drop the network, i.e. free memory of T_ASC_Network* structure. This call */
-    /* is the counterpart of ASC_initializeNetwork(...) which was called above. */
-    cond = ASC_dropNetwork(&net);
-    if (cond.bad())
-    {
-      LOG(ERROR) << "Error while dropping the network: " << cond.text();
-    }
-  }                           
+  }
 
 
   DicomServer::DicomServer() : 
@@ -216,9 +97,7 @@ namespace Orthanc
     applicationEntityFilter_ = NULL;
     checkCalledAet_ = true;
     clientTimeout_ = 30;
-    isThreaded_ = true;
     continue_ = false;
-    started_ = false;
   }
 
   DicomServer::~DicomServer()
@@ -239,17 +118,6 @@ namespace Orthanc
   uint16_t DicomServer::GetPortNumber() const
   {
     return port_;
-  }
-
-  void DicomServer::SetThreaded(bool isThreaded)
-  {
-    Stop();
-    isThreaded_ = isThreaded;
-  }
-
-  bool DicomServer::IsThreaded() const
-  {
-    return isThreaded_;
   }
 
   void DicomServer::SetClientTimeout(uint32_t timeout)
@@ -403,14 +271,19 @@ namespace Orthanc
   void DicomServer::Start()
   {
     Stop();
-    continue_ = true;
-    started_ = false;
-    pimpl_->thread_ = boost::thread(ServerThread, this);
 
-    while (!started_)
+    /* initialize network, i.e. create an instance of T_ASC_Network*. */
+    OFCondition cond = ASC_initializeNetwork
+      (NET_ACCEPTOR, OFstatic_cast(int, port_), /*opt_acse_timeout*/ 30, &pimpl_->network_);
+    if (cond.bad())
     {
-      Toolbox::USleep(50000);  // Wait 50ms
+      LOG(ERROR) << "cannot create network: " << cond.text();
+      throw OrthancException(ErrorCode_DicomPortInUse);
     }
+
+    continue_ = true;
+    pimpl_->workers_.reset(new RunnableWorkersPool(4));   // Use 4 workers - TODO as a parameter?
+    pimpl_->thread_ = boost::thread(ServerThread, this);
   }
 
 
@@ -425,7 +298,15 @@ namespace Orthanc
         pimpl_->thread_.join();
       }
 
-      bagOfDispatchers_.Finalize();
+      pimpl_->workers_.reset(NULL);
+
+      /* drop the network, i.e. free memory of T_ASC_Network* structure. This call */
+      /* is the counterpart of ASC_initializeNetwork(...) which was called above. */
+      OFCondition cond = ASC_dropNetwork(&pimpl_->network_);
+      if (cond.bad())
+      {
+        LOG(ERROR) << "Error while dropping the network: " << cond.text();
+      }
     }
   }
 

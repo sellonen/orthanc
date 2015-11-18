@@ -1,13 +1,46 @@
 Pending changes in the mainline
 ===============================
 
+* Full indexation of the patient/study tags to speed up searches and C-Find
 * Add ".dcm" suffix to files in ZIP archives (cf. URI ".../archive")
+* "/tools/create-dicom": Support of binary tags encoded using data URI scheme
+* "/tools/create-dicom": Support of hierarchical structures (creation of sequences)
+* "/modify" can insert/modify sequences
+* "/series/.../ordered-slices" to order the slices of a 2D+t or 3D image
+* New URI "/tools/shutdown" to stop Orthanc from the REST API
+* New URIs for attachments: ".../compress", ".../uncompress" and ".../is-compressed"
+* New configuration option: "Dictionary" to declare custom DICOM tags
+* MIME content type can be associated to custom attachments (cf. "UserContentType")
+* New URIs "/tools/create-archive" and "/tools/create-media" to create ZIP/DICOMDIR
+  from a set of resources
+* ".../preview" and ".../image-uint8" can return JPEG images if the HTTP Accept Header asks so
+
+Plugins
+-------
+
+* New function "OrthancPluginRegisterErrorCode()" to declare custom error codes
+* New function "OrthancPluginRegisterDictionaryTag()" to declare custom DICOM tags
+* New function "OrthancPluginRestApiGet2()" to provide HTTP headers when calling Orthanc API
+* New "OrthancStarted", "OrthancStopped", "UpdatedAttachment" 
+  and "UpdatedMetadata" events in change callbacks
+* "/system" URI gives information about the plugins used for storage area and DB back-end
+* Plugin callbacks should now return explicit "OrthancPluginErrorCode" instead of integers
+
+Lua
+---
+
+* Optional argument "keepStrings" in "DumpJson()"
 
 Maintenance
 -----------
 
-* "/system" URI gives information about the plugins used for storage area and DB back-end
-* Plugin callbacks must now return explicit "OrthancPluginErrorCode" instead of integers
+* Full refactoring of the searching features
+* C-Move SCP for studies using AccessionNumber tag
+* Fix issue 4 (C-Store Association not renegotiated on Specific-to-specific transfer syntax change)
+* "/tools/create-dicom" can create tags with unknown VR
+* "--logdir" flag creates a single log file instead of 3 separate files for errors/warnings/infos
+* "--errors" flag lists the error codes that could be returned by Orthanc
+* Under Windows, the exit status of Orthanc corresponds to the encountered error code
 
 
 Version 0.9.4 (2015/09/16)

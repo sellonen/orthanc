@@ -189,7 +189,7 @@ namespace Orthanc
       resultPublicId = hasher.HashInstance();
 
       Json::Value simplifiedTags;
-      SimplifyTags(simplifiedTags, dicom.GetJson());
+      Toolbox::SimplifyTags(simplifiedTags, dicom.GetJson());
 
       // Test if the instance must be filtered out
       bool accepted = true;
@@ -299,7 +299,7 @@ namespace Orthanc
     {
       if (e.GetErrorCode() == ErrorCode_InexistentTag)
       {
-        LogMissingRequiredTag(dicom.GetSummary());
+        Toolbox::LogMissingRequiredTag(dicom.GetSummary());
       }
 
       throw;
@@ -307,19 +307,64 @@ namespace Orthanc
   }
 
 
-
   void ServerContext::AnswerAttachment(RestApiOutput& output,
-                                       const std::string& instancePublicId,
+                                       const std::string& resourceId,
                                        FileContentType content)
   {
     FileInfo attachment;
-    if (!index_.LookupAttachment(attachment, instancePublicId, content))
+    if (!index_.LookupAttachment(attachment, resourceId, content))
     {
-      throw OrthancException(ErrorCode_InternalError);
+      throw OrthancException(ErrorCode_UnknownResource);
     }
 
     StorageAccessor accessor(area_);
-    accessor.AnswerFile(output, attachment);
+    accessor.AnswerFile(output, attachment, GetFileContentMime(content));
+  }
+
+
+  void ServerContext::ChangeAttachmentCompression(const std::string& resourceId,
+                                                  FileContentType attachmentType,
+                                                  CompressionType compression)
+  {
+    LOG(INFO) << "Changing compression type for attachment "
+              << EnumerationToString(attachmentType) 
+              << " of resource " << resourceId << " to " 
+              << compression; 
+
+    FileInfo attachment;
+    if (!index_.LookupAttachment(attachment, resourceId, attachmentType))
+    {
+      throw OrthancException(ErrorCode_UnknownResource);
+    }
+
+    if (attachment.GetCompressionType() == compression)
+    {
+      // Nothing to do
+      return;
+    }
+
+    std::string content;
+
+    StorageAccessor accessor(area_);
+    accessor.Read(content, attachment);
+
+    FileInfo modified = accessor.Write(content.empty() ? NULL : content.c_str(),
+                                       content.size(), attachmentType, compression, storeMD5_);
+
+    try
+    {
+      StoreStatus status = index_.AddAttachment(modified, resourceId);
+      if (status != StoreStatus_Success)
+      {
+        accessor.Remove(modified);
+        throw OrthancException(ErrorCode_Database);
+      }
+    }
+    catch (OrthancException&)
+    {
+      accessor.Remove(modified);
+      throw;
+    }    
   }
 
 
@@ -359,6 +404,14 @@ namespace Orthanc
       // raw data
       area_.Read(result, attachment.GetUuid(), content);
     }
+  }
+
+
+  void ServerContext::ReadFile(std::string& result,
+                               const FileInfo& file)
+  {
+    StorageAccessor accessor(area_);
+    accessor.Read(result, file);
   }
 
 
@@ -475,6 +528,18 @@ namespace Orthanc
     }
   }
 
+  OrthancPlugins& ServerContext::GetPlugins()
+  {
+    if (HasPlugins())
+    {
+      return *plugins_;
+    }
+    else
+    {
+      throw OrthancException(ErrorCode_InternalError);
+    }
+  }
+
 #endif
 
 
@@ -486,4 +551,39 @@ namespace Orthanc
     return false;
 #endif
   }
+
+
+  bool ServerContext::Apply(std::list<std::string>& result,
+                            const ::Orthanc::LookupResource& lookup,
+                            size_t maxResults)
+  {
+    result.clear();
+
+    std::vector<std::string> resources, instances;
+    GetIndex().FindCandidates(resources, instances, lookup);
+
+    assert(resources.size() == instances.size());
+
+    for (size_t i = 0; i < instances.size(); i++)
+    {
+      Json::Value dicom;
+      ReadJson(dicom, instances[i]);
+      
+      if (lookup.IsMatch(dicom))
+      {
+        if (maxResults != 0 &&
+            result.size() >= maxResults)
+        {
+          return false;  // too many results
+        }
+        else
+        {
+          result.push_back(resources[i]);
+        }
+      }
+    }
+
+    return true;  // finished
+  }
+
 }

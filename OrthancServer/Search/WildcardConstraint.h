@@ -32,36 +32,32 @@
 
 #pragma once
 
-#include "DicomValue.h"
+#include "IFindConstraint.h"
+
+#include <boost/shared_ptr.hpp>
 
 namespace Orthanc
 {
-  class DicomString : public DicomValue
+  class WildcardConstraint : public IFindConstraint
   {
   private:
-    std::string value_;
+    struct PImpl;
+    boost::shared_ptr<PImpl>  pimpl_;
+
+    WildcardConstraint(const WildcardConstraint& other);
 
   public:
-    DicomString(const std::string& v) : value_(v)
+    WildcardConstraint(const std::string& wildcard,
+                       bool isCaseSensitive);
+
+    virtual IFindConstraint* Clone() const
     {
+      return new WildcardConstraint(*this);
     }
 
-    DicomString(const char* v)
-    {
-      if (v)
-        value_ = v;
-      else
-        value_ = "";
-    }
+    virtual void Setup(LookupIdentifierQuery& lookup,
+                       const DicomTag& tag) const;
 
-    virtual DicomValue* Clone() const 
-    {
-      return new DicomString(value_);
-    }
-
-    virtual std::string AsString() const
-    {
-      return value_;
-    }
+    virtual bool Match(const std::string& value) const;
   };
 }

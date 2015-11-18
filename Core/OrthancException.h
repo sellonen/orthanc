@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <string>
 #include "Enumerations.h"
 
@@ -40,7 +41,7 @@ namespace Orthanc
   class OrthancException
   {
   protected:
-    ErrorCode errorCode_;
+    ErrorCode  errorCode_;
     HttpStatus httpStatus_;
 
   public:

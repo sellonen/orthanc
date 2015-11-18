@@ -43,6 +43,7 @@
 #include "../../Core/Logging.h"
 #include "../../Core/OrthancException.h"
 #include "../../Core/Toolbox.h"
+#include "../../OrthancServer/FromDcmtkBridge.h"
 #include "../../OrthancServer/OrthancInitialization.h"
 #include "../../OrthancServer/ServerContext.h"
 #include "../../OrthancServer/ServerToolbox.h"
@@ -66,6 +67,7 @@ namespace Orthanc
     {
     private:
       _OrthancPluginRegisterStorageArea callbacks_;
+      PluginsErrorDictionary&  errorDictionary_;
 
       void Free(void* buffer) const
       {
@@ -76,7 +78,10 @@ namespace Orthanc
       }
 
     public:
-      PluginStorageArea(const _OrthancPluginRegisterStorageArea& callbacks) : callbacks_(callbacks)
+      PluginStorageArea(const _OrthancPluginRegisterStorageArea& callbacks,
+                        PluginsErrorDictionary&  errorDictionary) : 
+        callbacks_(callbacks),
+        errorDictionary_(errorDictionary)
       {
       }
 
@@ -91,7 +96,8 @@ namespace Orthanc
 
         if (error != OrthancPluginErrorCode_Success)
         {
-          throw OrthancException(Plugins::Convert(error));
+          errorDictionary_.LogError(error, true);
+          throw OrthancException(static_cast<ErrorCode>(error));
         }
       }
 
@@ -108,7 +114,8 @@ namespace Orthanc
 
         if (error != OrthancPluginErrorCode_Success)
         {
-          throw OrthancException(Plugins::Convert(error));
+          errorDictionary_.LogError(error, true);
+          throw OrthancException(static_cast<ErrorCode>(error));
         }
 
         try
@@ -118,7 +125,7 @@ namespace Orthanc
         catch (...)
         {
           Free(buffer);
-          throw;
+          throw OrthancException(ErrorCode_NotEnoughMemory);
         }
 
         if (size > 0)
@@ -138,7 +145,8 @@ namespace Orthanc
 
         if (error != OrthancPluginErrorCode_Success)
         {
-          throw OrthancException(Plugins::Convert(error));
+          errorDictionary_.LogError(error, true);
+          throw OrthancException(static_cast<ErrorCode>(error));
         }
       }
     };
@@ -149,12 +157,15 @@ namespace Orthanc
     private:
       SharedLibrary&   sharedLibrary_;
       _OrthancPluginRegisterStorageArea  callbacks_;
+      PluginsErrorDictionary&  errorDictionary_;
 
     public:
       StorageAreaFactory(SharedLibrary& sharedLibrary,
-                         const _OrthancPluginRegisterStorageArea& callbacks) :
+                         const _OrthancPluginRegisterStorageArea& callbacks,
+                         PluginsErrorDictionary&  errorDictionary) :
         sharedLibrary_(sharedLibrary),
-        callbacks_(callbacks)
+        callbacks_(callbacks),
+        errorDictionary_(errorDictionary)
       {
       }
 
@@ -165,7 +176,7 @@ namespace Orthanc
 
       IStorageArea* Create() const
       {
-        return new PluginStorageArea(callbacks_);
+        return new PluginStorageArea(callbacks_, errorDictionary_);
       }
     };
   }
@@ -242,6 +253,7 @@ namespace Orthanc
     int argc_;
     char** argv_;
     std::auto_ptr<OrthancPluginDatabase>  database_;
+    PluginsErrorDictionary  dictionary_;
 
     PImpl() : 
       context_(NULL), 
@@ -286,7 +298,17 @@ namespace Orthanc
         sizeof(int32_t) != sizeof(OrthancPluginChangeType) ||
         sizeof(int32_t) != sizeof(OrthancPluginImageFormat) ||
         sizeof(int32_t) != sizeof(OrthancPluginCompressionType) ||
-        sizeof(int32_t) != sizeof(_OrthancPluginDatabaseAnswerType))
+        sizeof(int32_t) != sizeof(OrthancPluginValueRepresentation) ||
+        sizeof(int32_t) != sizeof(OrthancPluginDicomToJsonFlags) ||
+        sizeof(int32_t) != sizeof(OrthancPluginDicomToJsonFormat) ||
+        sizeof(int32_t) != sizeof(_OrthancPluginDatabaseAnswerType) ||
+        sizeof(int32_t) != sizeof(OrthancPluginIdentifierConstraint) ||
+        static_cast<int>(OrthancPluginDicomToJsonFlags_IncludeBinary) != static_cast<int>(DicomToJsonFlags_IncludeBinary) ||
+        static_cast<int>(OrthancPluginDicomToJsonFlags_IncludePrivateTags) != static_cast<int>(DicomToJsonFlags_IncludePrivateTags) ||
+        static_cast<int>(OrthancPluginDicomToJsonFlags_IncludeUnknownTags) != static_cast<int>(DicomToJsonFlags_IncludeUnknownTags) ||
+        static_cast<int>(OrthancPluginDicomToJsonFlags_IncludePixelData) != static_cast<int>(DicomToJsonFlags_IncludePixelData) ||
+        static_cast<int>(OrthancPluginDicomToJsonFlags_ConvertBinaryToNull) != static_cast<int>(DicomToJsonFlags_ConvertBinaryToNull) ||
+        static_cast<int>(OrthancPluginDicomToJsonFlags_ConvertBinaryToAscii) != static_cast<int>(DicomToJsonFlags_ConvertBinaryToAscii))
     {
       /* Sanity check of the compiler */
       throw OrthancException(ErrorCode_Plugin);
@@ -463,7 +485,8 @@ namespace Orthanc
     }
     else
     {
-      throw OrthancException(Plugins::Convert(error));
+      GetErrorDictionary().LogError(error, true);
+      throw OrthancException(static_cast<ErrorCode>(error));
     }
   }
 
@@ -484,7 +507,30 @@ namespace Orthanc
 
       if (error != OrthancPluginErrorCode_Success)
       {
-        throw OrthancException(Plugins::Convert(error));
+        GetErrorDictionary().LogError(error, true);
+        throw OrthancException(static_cast<ErrorCode>(error));
+      }
+    }
+  }
+
+
+
+  void OrthancPlugins::SignalChangeInternal(OrthancPluginChangeType changeType,
+                                            OrthancPluginResourceType resourceType,
+                                            const char* resource)
+  {
+    boost::recursive_mutex::scoped_lock lock(pimpl_->changeCallbackMutex_);
+
+    for (std::list<OrthancPluginOnChangeCallback>::const_iterator 
+           callback = pimpl_->onChangeCallbacks_.begin(); 
+         callback != pimpl_->onChangeCallbacks_.end(); ++callback)
+    {
+      OrthancPluginErrorCode error = (*callback) (changeType, resourceType, resource);
+
+      if (error != OrthancPluginErrorCode_Success)
+      {
+        GetErrorDictionary().LogError(error, true);
+        throw OrthancException(static_cast<ErrorCode>(error));
       }
     }
   }
@@ -493,22 +539,9 @@ namespace Orthanc
 
   void OrthancPlugins::SignalChange(const ServerIndexChange& change)
   {
-    boost::recursive_mutex::scoped_lock lock(pimpl_->changeCallbackMutex_);
-
-    for (std::list<OrthancPluginOnChangeCallback>::const_iterator 
-           callback = pimpl_->onChangeCallbacks_.begin(); 
-         callback != pimpl_->onChangeCallbacks_.end(); ++callback)
-    {
-      OrthancPluginErrorCode error = (*callback)
-        (Plugins::Convert(change.GetChangeType()),
-         Plugins::Convert(change.GetResourceType()),
-         change.GetPublicId().c_str());
-
-      if (error != OrthancPluginErrorCode_Success)
-      {
-        throw OrthancException(Plugins::Convert(error));
-      }
-    }
+    SignalChangeInternal(Plugins::Convert(change.GetChangeType()),
+                         Plugins::Convert(change.GetResourceType()),
+                         change.GetPublicId().c_str());
   }
 
 
@@ -743,8 +776,7 @@ namespace Orthanc
   {
     if (!pimpl_->context_)
     {
-      LOG(ERROR) << "Plugin trying to call the database during its initialization";
-      throw OrthancException(ErrorCode_Plugin);
+      throw OrthancException(ErrorCode_DatabaseNotInitialized);
     }
   }
 
@@ -777,6 +809,36 @@ namespace Orthanc
 
     std::string result;
     if (HttpToolbox::SimpleGet(result, handler, RequestOrigin_Plugins, p.uri))
+    {
+      CopyToMemoryBuffer(*p.target, result);
+    }
+    else
+    {
+      throw OrthancException(ErrorCode_BadRequest);
+    }
+  }
+
+
+  void OrthancPlugins::RestApiGet2(const void* parameters)
+  {
+    const _OrthancPluginRestApiGet2& p = 
+      *reinterpret_cast<const _OrthancPluginRestApiGet2*>(parameters);
+        
+    LOG(INFO) << "Plugin making REST GET call on URI " << p.uri
+              << (p.afterPlugins ? " (after plugins)" : " (built-in API)");
+
+    IHttpHandler::Arguments headers;
+
+    for (uint32_t i = 0; i < p.headersCount; i++)
+    {
+      headers[p.headersKeys[i]] = p.headersValues[i];
+    }
+
+    CheckContextAvailable();
+    IHttpHandler& handler = pimpl_->context_->GetHttpHandler().RestrictToOrthancRestApi(!p.afterPlugins);
+
+    std::string result;
+    if (HttpToolbox::SimpleGet(result, handler, RequestOrigin_Plugins, p.uri, headers))
     {
       CopyToMemoryBuffer(*p.target, result);
     }
@@ -880,7 +942,7 @@ namespace Orthanc
     CheckContextAvailable();
 
     std::list<std::string> result;
-    pimpl_->context_->GetIndex().LookupIdentifier(result, tag, p.argument, level);
+    pimpl_->context_->GetIndex().LookupIdentifierExact(result, level, tag, p.argument);
 
     if (result.size() == 1)
     {
@@ -991,7 +1053,7 @@ namespace Orthanc
         else
         {
           Json::Value simplified;
-          SimplifyTags(simplified, instance.GetJson());
+          Toolbox::SimplifyTags(simplified, instance.GetJson());
           s = writer.write(simplified);
         }
 
@@ -1214,7 +1276,57 @@ namespace Orthanc
 
     font.Draw(target, p.utf8Text, p.x, p.y, p.r, p.g, p.b);
   }
+
+
+  void OrthancPlugins::ApplyDicomToJson(_OrthancPluginService service,
+                                        const void* parameters)
+  {
+    const _OrthancPluginDicomToJson& p =
+      *reinterpret_cast<const _OrthancPluginDicomToJson*>(parameters);
+
+    std::auto_ptr<ParsedDicomFile> dicom;
+
+    if (service == _OrthancPluginService_DicomBufferToJson)
+    {
+      dicom.reset(new ParsedDicomFile(p.buffer, p.size));
+    }
+    else
+    {
+      if (p.instanceId == NULL)
+      {
+        throw OrthancException(ErrorCode_ParameterOutOfRange);
+      }
+
+      std::string content;
+      pimpl_->context_->ReadFile(content, p.instanceId, FileContentType_Dicom);
+      dicom.reset(new ParsedDicomFile(content));
+    }
+
+    Json::Value json;
+    dicom->ToJson(json, Plugins::Convert(p.format), 
+                  static_cast<DicomToJsonFlags>(p.flags), p.maxStringLength);
+
+    Json::FastWriter writer;
+    *p.result = CopyString(writer.write(json));
+  }
         
+
+  void OrthancPlugins::DatabaseAnswer(const void* parameters)
+  {
+    const _OrthancPluginDatabaseAnswer& p =
+      *reinterpret_cast<const _OrthancPluginDatabaseAnswer*>(parameters);
+
+    if (pimpl_->database_.get() != NULL)
+    {
+      pimpl_->database_->AnswerReceived(p);
+    }
+    else
+    {
+      LOG(ERROR) << "Cannot invoke this service without a custom database back-end";
+      throw OrthancException(ErrorCode_BadRequest);
+    }
+  }
+
 
   bool OrthancPlugins::InvokeService(SharedLibrary& plugin,
                                      _OrthancPluginService service,
@@ -1222,7 +1334,20 @@ namespace Orthanc
   {
     VLOG(1) << "Calling service " << service << " from plugin " << plugin.GetPath();
 
-    boost::recursive_mutex::scoped_lock lock(pimpl_->invokeServiceMutex_);
+    if (service == _OrthancPluginService_DatabaseAnswer)
+    {
+      // This case solves a deadlock at (*) reported by James Webster
+      // on 2015-10-27 that was present in versions of Orthanc <=
+      // 0.9.4 and related to database plugins implementing a custom
+      // index. The problem was that locking the database is already
+      // ensured by the "ServerIndex" class if the invoked service is
+      // "DatabaseAnswer".
+      DatabaseAnswer(parameters);
+      return true;
+    }
+
+
+    std::auto_ptr<boost::recursive_mutex::scoped_lock> lock;   // (*)
 
     switch (service)
     {
@@ -1298,6 +1423,10 @@ namespace Orthanc
 
       case _OrthancPluginService_RestApiGetAfterPlugins:
         RestApiGet(parameters, true);
+        return true;
+
+      case _OrthancPluginService_RestApiGet2:
+        RestApiGet2(parameters);
         return true;
 
       case _OrthancPluginService_RestApiPost:
@@ -1378,7 +1507,7 @@ namespace Orthanc
         
         if (pimpl_->storageArea_.get() == NULL)
         {
-          pimpl_->storageArea_.reset(new StorageAreaFactory(plugin, p));
+          pimpl_->storageArea_.reset(new StorageAreaFactory(plugin, p, GetErrorDictionary()));
         }
         else
         {
@@ -1457,7 +1586,8 @@ namespace Orthanc
 
         if (pimpl_->database_.get() == NULL)
         {
-          pimpl_->database_.reset(new OrthancPluginDatabase(plugin, *p.backend, NULL, 0, p.payload));
+          pimpl_->database_.reset(new OrthancPluginDatabase(plugin, GetErrorDictionary(), 
+                                                            *p.backend, NULL, 0, p.payload));
         }
         else
         {
@@ -1478,7 +1608,8 @@ namespace Orthanc
 
         if (pimpl_->database_.get() == NULL)
         {
-          pimpl_->database_.reset(new OrthancPluginDatabase(plugin, *p.backend, p.extensions,
+          pimpl_->database_.reset(new OrthancPluginDatabase(plugin, GetErrorDictionary(),
+                                                            *p.backend, p.extensions,
                                                             p.extensionsSize, p.payload));
         }
         else
@@ -1492,21 +1623,7 @@ namespace Orthanc
       }
 
       case _OrthancPluginService_DatabaseAnswer:
-      {
-        const _OrthancPluginDatabaseAnswer& p =
-          *reinterpret_cast<const _OrthancPluginDatabaseAnswer*>(parameters);
-
-        if (pimpl_->database_.get() != NULL)
-        {
-          pimpl_->database_->AnswerReceived(p);
-          return true;
-        }
-        else
-        {
-          LOG(ERROR) << "Cannot invoke this service without a custom database back-end";
-          throw OrthancException(ErrorCode_BadRequest);
-        }
-      }
+        throw OrthancException(ErrorCode_InternalError);   // Implemented before locking (*)
 
       case _OrthancPluginService_GetExpectedDatabaseVersion:
       {
@@ -1674,6 +1791,46 @@ namespace Orthanc
         return true;
       }
 
+      case _OrthancPluginService_RegisterErrorCode:
+      {
+        const _OrthancPluginRegisterErrorCode& p =
+          *reinterpret_cast<const _OrthancPluginRegisterErrorCode*>(parameters);
+        *(p.target) = pimpl_->dictionary_.Register(plugin, p.code, p.httpStatus, p.message);
+        return true;
+      }
+
+      case _OrthancPluginService_RegisterDictionaryTag:
+      {
+        const _OrthancPluginRegisterDictionaryTag& p =
+          *reinterpret_cast<const _OrthancPluginRegisterDictionaryTag*>(parameters);
+        FromDcmtkBridge::RegisterDictionaryTag(DicomTag(p.group, p.element),
+                                               Plugins::Convert(p.vr), p.name,
+                                               p.minMultiplicity, p.maxMultiplicity);
+        return true;
+      }
+
+      case _OrthancPluginService_ReconstructMainDicomTags:
+      {
+        const _OrthancPluginReconstructMainDicomTags& p =
+          *reinterpret_cast<const _OrthancPluginReconstructMainDicomTags*>(parameters);
+
+        if (pimpl_->database_.get() == NULL)
+        {
+          LOG(ERROR) << "The service ReconstructMainDicomTags can only be invoked by custom database plugins";
+          throw OrthancException(ErrorCode_DatabasePlugin);
+        }
+
+        IStorageArea& storage = *reinterpret_cast<IStorageArea*>(p.storageArea);
+        Toolbox::ReconstructMainDicomTags(*pimpl_->database_, storage, Plugins::Convert(p.level));
+
+        return true;
+      }
+
+      case _OrthancPluginService_DicomBufferToJson:
+      case _OrthancPluginService_DicomInstanceToJson:
+        ApplyDicomToJson(service, parameters);
+        return true;
+
       default:
       {
         // This service is unknown to the Orthanc plugin engine
@@ -1784,5 +1941,11 @@ namespace Orthanc
   const PluginsManager& OrthancPlugins::GetManager() const
   {
     return pimpl_->manager_;
+  }
+
+
+  PluginsErrorDictionary&  OrthancPlugins::GetErrorDictionary()
+  {
+    return pimpl_->dictionary_;
   }
 }

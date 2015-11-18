@@ -36,7 +36,6 @@
 #include "../Core/Uuid.h"
 #include "../Core/OrthancException.h"
 #include "../Core/DicomFormat/DicomMap.h"
-#include "../Core/DicomFormat/DicomNullValue.h"
 #include "../OrthancServer/FromDcmtkBridge.h"
 
 #include <memory>
@@ -103,7 +102,7 @@ TEST(DicomMap, Tags)
   m.SetValue(DICOM_TAG_PATIENT_ID, "PatientID");
   ASSERT_TRUE(m.HasTag(0x0010, 0x0020));
   m.SetValue(DICOM_TAG_PATIENT_ID, "PatientID2");
-  ASSERT_EQ("PatientID2", m.GetValue(0x0010, 0x0020).AsString());
+  ASSERT_EQ("PatientID2", m.GetValue(0x0010, 0x0020).GetContent());
 
   m.GetTags(s);
   ASSERT_EQ(2u, s.size());
@@ -116,14 +115,14 @@ TEST(DicomMap, Tags)
   ASSERT_EQ(DICOM_TAG_PATIENT_NAME, *s.begin());
 
   std::auto_ptr<DicomMap> mm(m.Clone());
-  ASSERT_EQ("PatientName", mm->GetValue(DICOM_TAG_PATIENT_NAME).AsString());  
+  ASSERT_EQ("PatientName", mm->GetValue(DICOM_TAG_PATIENT_NAME).GetContent());  
 
   m.SetValue(DICOM_TAG_PATIENT_ID, "Hello");
   ASSERT_THROW(mm->GetValue(DICOM_TAG_PATIENT_ID), OrthancException);
   mm->CopyTagIfExists(m, DICOM_TAG_PATIENT_ID);
-  ASSERT_EQ("Hello", mm->GetValue(DICOM_TAG_PATIENT_ID).AsString());  
+  ASSERT_EQ("Hello", mm->GetValue(DICOM_TAG_PATIENT_ID).GetContent());  
 
-  DicomNullValue v;
+  DicomValue v;
   ASSERT_TRUE(v.IsNull());
 }
 
@@ -170,18 +169,12 @@ static void TestModule(ResourceType level,
       }*/
 
     // Exceptions for the Instance level
-    if ((/* Accession number, from Image module */
-          *it == DicomTag(0x0020, 0x0012) && 
-          level == ResourceType_Instance) ||
-        (/* Image Index, from PET Image module */
-          *it == DicomTag(0x0054, 0x1330) && 
-          level == ResourceType_Instance) ||
-        (/* Temporal Position Identifier, from MR Image module */
-          *it == DicomTag(0x0020, 0x0100) && 
-          level == ResourceType_Instance) ||
-        (/* Number of Frames, from Multi-frame module attributes, related to Image IOD */
-          *it == DicomTag(0x0028, 0x0008) && 
-          level == ResourceType_Instance ))
+    if (level == ResourceType_Instance &&
+        (*it == DicomTag(0x0020, 0x0012) ||  /* Accession number, from Image module */
+         *it == DicomTag(0x0054, 0x1330) ||  /* Image Index, from PET Image module */
+         *it == DicomTag(0x0020, 0x0100) ||  /* Temporal Position Identifier, from MR Image module */
+         *it == DicomTag(0x0028, 0x0008) ||  /* Number of Frames, from Multi-frame module attributes, related to Image IOD */
+         *it == DICOM_TAG_IMAGE_POSITION_PATIENT))
     {
       ok = true;
     }

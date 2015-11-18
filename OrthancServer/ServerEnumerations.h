@@ -35,6 +35,7 @@
 #include <map>
 
 #include "../Core/Enumerations.h"
+#include "../Core/DicomFormat/DicomTag.h"
 
 namespace Orthanc
 {
@@ -100,6 +101,38 @@ namespace Orthanc
     ValueRepresentation_Time
   };
 
+  enum DicomToJsonFormat
+  {
+    DicomToJsonFormat_Full,
+    DicomToJsonFormat_Short,
+    DicomToJsonFormat_Simple
+  };
+
+  enum DicomToJsonFlags
+  {
+    DicomToJsonFlags_IncludeBinary         = (1 << 0),
+    DicomToJsonFlags_IncludePrivateTags    = (1 << 1),
+    DicomToJsonFlags_IncludeUnknownTags    = (1 << 2),
+    DicomToJsonFlags_IncludePixelData      = (1 << 3),
+    DicomToJsonFlags_ConvertBinaryToAscii  = (1 << 4),
+    DicomToJsonFlags_ConvertBinaryToNull   = (1 << 5),
+
+    // Some predefined combinations
+    DicomToJsonFlags_None     = 0,
+    DicomToJsonFlags_Default  = (DicomToJsonFlags_IncludePrivateTags | 
+                                 DicomToJsonFlags_IncludeUnknownTags | 
+                                 DicomToJsonFlags_IncludePixelData | 
+                                 DicomToJsonFlags_ConvertBinaryToNull)
+  };
+
+  enum IdentifierConstraintType
+  {
+    IdentifierConstraintType_Equal,
+    IdentifierConstraintType_SmallerOrEqual,
+    IdentifierConstraintType_GreaterOrEqual,
+    IdentifierConstraintType_Wildcard        /* Case sensitive, "*" or "?" are the only allowed wildcards */
+  };
+
 
   /**
    * WARNING: Do not change the explicit values in the enumerations
@@ -109,7 +142,7 @@ namespace Orthanc
 
   enum GlobalProperty
   {
-    GlobalProperty_DatabaseSchemaVersion = 1,
+    GlobalProperty_DatabaseSchemaVersion = 1,   // Unused in the Orthanc core as of Orthanc 0.9.5
     GlobalProperty_FlushSleep = 2,
     GlobalProperty_AnonymizationSequence = 3
   };
@@ -145,6 +178,8 @@ namespace Orthanc
     ChangeType_StablePatient = 12,
     ChangeType_StableStudy = 13,
     ChangeType_StableSeries = 14,
+    ChangeType_UpdatedAttachment = 15,
+    ChangeType_UpdatedMetadata = 16,
 
     ChangeType_INTERNAL_LastLogged = 4095,
 
@@ -165,11 +200,14 @@ namespace Orthanc
   std::string EnumerationToString(MetadataType type);
 
   void RegisterUserContentType(int contentType,
-                               const std::string& name);
+                               const std::string& name,
+                               const std::string& mime);
 
   FileContentType StringToContentType(const std::string& str);
 
   std::string EnumerationToString(FileContentType type);
+
+  std::string GetFileContentMime(FileContentType type);
 
   std::string GetBasePath(ResourceType type,
                           const std::string& publicId);
@@ -187,4 +225,6 @@ namespace Orthanc
   const char* EnumerationToString(TransferSyntax syntax);
 
   ModalityManufacturer StringToModalityManufacturer(const std::string& manufacturer);
+
+  bool IsUserMetadata(MetadataType type);
 }

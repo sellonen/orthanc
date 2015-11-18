@@ -30,72 +30,44 @@
  **/
 
 
-#pragma once
+#include "../PrecompiledHeadersServer.h"
+#include "ValueConstraint.h"
 
-#include "ServerIndex.h"
+#include "../../Core/Toolbox.h"
 
-#include <boost/noncopyable.hpp>
+#include <stdio.h>
 
 namespace Orthanc
 {
-  class ResourceFinder : public boost::noncopyable
+  ValueConstraint::ValueConstraint(const std::string& value,
+                                   bool isCaseSensitive) : 
+    value_(value),
+    isCaseSensitive_(isCaseSensitive)
   {
-  public:
-    class IQuery : public boost::noncopyable
+    if (!isCaseSensitive)
     {
-    public:
-      virtual ~IQuery()
-      {
-      }
-
-      virtual ResourceType GetLevel() const = 0;
-
-      virtual bool RestrictIdentifier(std::string& value,
-                                      DicomTag identifier) const = 0;
-
-      virtual bool HasMainDicomTagsFilter(ResourceType level) const = 0;
-
-      virtual bool FilterMainDicomTags(const std::string& resourceId,
-                                       ResourceType level,
-                                       const DicomMap& mainTags) const = 0;
-
-      virtual bool HasInstanceFilter() const = 0;
-
-      virtual bool FilterInstance(const std::string& instanceId,
-                                  const Json::Value& content) const = 0;
-    };
-
-
-  private:
-    typedef std::map<DicomTag, std::string>  Identifiers;
-
-    class CandidateResources;
-
-    ServerContext&    context_;
-    size_t            maxResults_;
-
-    void ApplyAtLevel(CandidateResources& candidates,
-                      const IQuery& query,
-                      ResourceType level);
-
-  public:
-    ResourceFinder(ServerContext& context);
-
-    void SetMaxResults(size_t value)
-    {
-      maxResults_ = value;
+      Toolbox::ToUpperCase(value_);
     }
+  }
 
-    size_t GetMaxResults() const
+
+  void ValueConstraint::Setup(LookupIdentifierQuery& lookup,
+                              const DicomTag& tag) const
+  {
+    lookup.AddConstraint(tag, IdentifierConstraintType_Equal, value_);
+  }
+
+  bool ValueConstraint::Match(const std::string& value) const
+  {
+    if (isCaseSensitive_)
     {
-      return maxResults_;
+      return value_ == value;
     }
-
-    // Returns "true" iff. all the matching resources have been
-    // returned. Will be "false" if the results were truncated by
-    // "SetMaxResults()".
-    bool Apply(std::list<std::string>& result,
-               const IQuery& query);
-  };
-
+    else
+    {
+      std::string v;
+      Toolbox::ToUpperCase(v, value);
+      return value_ == v;
+    }
+  }
 }

@@ -168,7 +168,10 @@ namespace Orthanc
           try
           {
             FromDcmtkBridge::Convert(summary, **imageDataSet);
-            FromDcmtkBridge::ToJson(dicomJson, **imageDataSet);       
+            FromDcmtkBridge::ToJson(dicomJson, **imageDataSet,
+                                    DicomToJsonFormat_Full, 
+                                    DicomToJsonFlags_Default, 
+                                    256 /* max string length */);
 
             if (!FromDcmtkBridge::SaveToMemoryBuffer(buffer, **imageDataSet))
             {
@@ -211,7 +214,7 @@ namespace Orthanc
 
                 if (e.GetErrorCode() == ErrorCode_InexistentTag)
                 {
-                  LogMissingRequiredTag(summary);
+                  Toolbox::LogMissingRequiredTag(summary);
                 }
                 else
                 {

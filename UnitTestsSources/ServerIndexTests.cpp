@@ -33,13 +33,13 @@
 #include "PrecompiledHeadersUnitTests.h"
 #include "gtest/gtest.h"
 
-#include "../Core/DicomFormat/DicomNullValue.h"
 #include "../Core/FileStorage/FilesystemStorage.h"
 #include "../Core/Logging.h"
 #include "../Core/Uuid.h"
 #include "../OrthancServer/DatabaseWrapper.h"
 #include "../OrthancServer/ServerContext.h"
 #include "../OrthancServer/ServerIndex.h"
+#include "../OrthancServer/Search/LookupIdentifierQuery.h"
 
 #include <ctype.h>
 #include <algorithm>
@@ -122,10 +122,12 @@ namespace
       }
 
       index_->SetListener(*listener_);
+      index_->Open();
     }
 
     virtual void TearDown()
     {
+      index_->Close();
       index_.reset(NULL);
       listener_.reset(NULL);
     }
@@ -244,6 +246,18 @@ namespace
           throw OrthancException(ErrorCode_InternalError);
       }
     }
+
+
+    void DoLookup(std::list<std::string>& result,
+                  ResourceType level,
+                  const DicomTag& tag,
+                  const std::string& value)
+    {
+      LookupIdentifierQuery query(level);
+      query.AddConstraint(tag, IdentifierConstraintType_Equal, value);
+      query.Apply(result, *index_);
+    }
+
   };
 }
 
@@ -660,6 +674,7 @@ TEST(ServerIndex, Sequence)
   Toolbox::RemoveFile(path + "/index");
   FilesystemStorage storage(path);
   DatabaseWrapper db;   // The SQLite DB is in memory
+  db.Open();
   ServerContext context(db, storage);
   ServerIndex& index = context.GetIndex();
 
@@ -669,6 +684,7 @@ TEST(ServerIndex, Sequence)
   ASSERT_EQ(4u, index.IncrementGlobalSequence(GlobalProperty_AnonymizationSequence));
 
   context.Stop();
+  db.Close();
 }
 
 
@@ -682,41 +698,69 @@ TEST_P(DatabaseWrapperTest, LookupIdentifier)
     index_->CreateResource("d", ResourceType_Series)   // 3
   };
 
-  index_->SetMainDicomTag(a[0], DICOM_TAG_STUDY_INSTANCE_UID, "0");
-  index_->SetMainDicomTag(a[1], DICOM_TAG_STUDY_INSTANCE_UID, "1");
-  index_->SetMainDicomTag(a[2], DICOM_TAG_STUDY_INSTANCE_UID, "0");
-  index_->SetMainDicomTag(a[3], DICOM_TAG_SERIES_INSTANCE_UID, "0");
+  index_->SetIdentifierTag(a[0], DICOM_TAG_STUDY_INSTANCE_UID, "0");
+  index_->SetIdentifierTag(a[1], DICOM_TAG_STUDY_INSTANCE_UID, "1");
+  index_->SetIdentifierTag(a[2], DICOM_TAG_STUDY_INSTANCE_UID, "0");
+  index_->SetIdentifierTag(a[3], DICOM_TAG_SERIES_INSTANCE_UID, "0");
 
-  std::list<int64_t> s;
+  std::list<std::string> s;
 
-  index_->LookupIdentifier(s, DICOM_TAG_STUDY_INSTANCE_UID, "0");
+  DoLookup(s, ResourceType_Study, DICOM_TAG_STUDY_INSTANCE_UID, "0");
   ASSERT_EQ(2u, s.size());
-  ASSERT_TRUE(std::find(s.begin(), s.end(), a[0]) != s.end());
-  ASSERT_TRUE(std::find(s.begin(), s.end(), a[2]) != s.end());
+  ASSERT_TRUE(std::find(s.begin(), s.end(), "a") != s.end());
+  ASSERT_TRUE(std::find(s.begin(), s.end(), "c") != s.end());
 
-  index_->LookupIdentifier(s, "0");
-  ASSERT_EQ(3u, s.size());
-  ASSERT_TRUE(std::find(s.begin(), s.end(), a[0]) != s.end());
-  ASSERT_TRUE(std::find(s.begin(), s.end(), a[2]) != s.end());
-  ASSERT_TRUE(std::find(s.begin(), s.end(), a[3]) != s.end());
-
-  index_->LookupIdentifier(s, DICOM_TAG_STUDY_INSTANCE_UID, "1");
+  DoLookup(s, ResourceType_Series, DICOM_TAG_SERIES_INSTANCE_UID, "0");
   ASSERT_EQ(1u, s.size());
-  ASSERT_TRUE(std::find(s.begin(), s.end(), a[1]) != s.end());
+  ASSERT_TRUE(std::find(s.begin(), s.end(), "d") != s.end());
 
-  index_->LookupIdentifier(s, "1");
+  DoLookup(s, ResourceType_Study, DICOM_TAG_STUDY_INSTANCE_UID, "1");
   ASSERT_EQ(1u, s.size());
-  ASSERT_TRUE(std::find(s.begin(), s.end(), a[1]) != s.end());
+  ASSERT_TRUE(std::find(s.begin(), s.end(), "b") != s.end());
 
+  DoLookup(s, ResourceType_Study, DICOM_TAG_STUDY_INSTANCE_UID, "1");
+  ASSERT_EQ(1u, s.size());
+  ASSERT_TRUE(std::find(s.begin(), s.end(), "b") != s.end());
 
-  /*{
-    std::list<std::string> s;
-    context.GetIndex().LookupIdentifier(s, DICOM_TAG_STUDY_INSTANCE_UID, "1.2.250.1.74.20130819132500.29000036381059");
-    for (std::list<std::string>::iterator i = s.begin(); i != s.end(); i++)
-    {
-    std::cout << "*** " << *i << std::endl;;
-    }      
-    }*/
+  DoLookup(s, ResourceType_Series, DICOM_TAG_SERIES_INSTANCE_UID, "1");
+  ASSERT_EQ(0u, s.size());
+
+  {
+    LookupIdentifierQuery query(ResourceType_Study);
+    query.AddConstraint(DICOM_TAG_STUDY_INSTANCE_UID, IdentifierConstraintType_GreaterOrEqual, "0");
+    query.Apply(s, *index_);
+    ASSERT_EQ(3u, s.size());
+  }
+
+  {
+    LookupIdentifierQuery query(ResourceType_Study);
+    query.AddConstraint(DICOM_TAG_STUDY_INSTANCE_UID, IdentifierConstraintType_GreaterOrEqual, "0");
+    query.AddConstraint(DICOM_TAG_STUDY_INSTANCE_UID, IdentifierConstraintType_SmallerOrEqual, "0");
+    query.Apply(s, *index_);
+    ASSERT_EQ(2u, s.size());
+  }
+
+  {
+    LookupIdentifierQuery query(ResourceType_Study);
+    query.AddConstraint(DICOM_TAG_STUDY_INSTANCE_UID, IdentifierConstraintType_GreaterOrEqual, "1");
+    query.AddConstraint(DICOM_TAG_STUDY_INSTANCE_UID, IdentifierConstraintType_SmallerOrEqual, "1");
+    query.Apply(s, *index_);
+    ASSERT_EQ(1u, s.size());
+  }
+
+  {
+    LookupIdentifierQuery query(ResourceType_Study);
+    query.AddConstraint(DICOM_TAG_STUDY_INSTANCE_UID, IdentifierConstraintType_GreaterOrEqual, "1");
+    query.Apply(s, *index_);
+    ASSERT_EQ(1u, s.size());
+  }
+
+  {
+    LookupIdentifierQuery query(ResourceType_Study);
+    query.AddConstraint(DICOM_TAG_STUDY_INSTANCE_UID, IdentifierConstraintType_GreaterOrEqual, "2");
+    query.Apply(s, *index_);
+    ASSERT_EQ(0u, s.size());
+  }
 }
 
 
@@ -728,6 +772,7 @@ TEST(ServerIndex, AttachmentRecycling)
   Toolbox::RemoveFile(path + "/index");
   FilesystemStorage storage(path);
   DatabaseWrapper db;   // The SQLite DB is in memory
+  db.Open();
   ServerContext context(db, storage);
   ServerIndex& index = context.GetIndex();
 
@@ -781,4 +826,12 @@ TEST(ServerIndex, AttachmentRecycling)
   ASSERT_THROW(Toolbox::GetFileSize(path + "/index"), OrthancException);  
 
   context.Stop();
+  db.Close();
+}
+
+
+TEST(LookupIdentifierQuery, NormalizeIdentifier)
+{
+  ASSERT_EQ("H^L.LO", LookupIdentifierQuery::NormalizeIdentifier("   Hé^l.LO  %_  "));
+  ASSERT_EQ("1.2.840.113619.2.176.2025", LookupIdentifierQuery::NormalizeIdentifier("   1.2.840.113619.2.176.2025  "));
 }

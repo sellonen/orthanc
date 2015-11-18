@@ -34,7 +34,6 @@
 
 #include "DicomTag.h"
 #include "DicomValue.h"
-#include "DicomString.h"
 #include "../Enumerations.h"
 
 #include <set>
@@ -105,14 +104,14 @@ namespace Orthanc
     void SetValue(const DicomTag& tag,
                   const std::string& str)
     {
-      SetValue(tag, new DicomString(str));
+      SetValue(tag, new DicomValue(str, false));
     }
 
     void SetValue(uint16_t group, 
                   uint16_t element, 
                   const std::string& str)
     {
-      SetValue(group, element, new DicomString(str));
+      SetValue(group, element, new DicomValue(str, false));
     }
 
     bool HasTag(uint16_t group, uint16_t element) const
@@ -173,5 +172,9 @@ namespace Orthanc
     void Print(FILE* fp) const;
 
     void GetTags(std::set<DicomTag>& tags) const;
+
+    static void LoadMainDicomTags(const DicomTag*& tags,
+                                  size_t& size,
+                                  ResourceType level);
   };
 }
