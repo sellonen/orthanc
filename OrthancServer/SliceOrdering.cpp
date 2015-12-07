@@ -320,7 +320,8 @@ namespace Orthanc
       if (instances_[i - 1]->GetIndexInSeries() == instances_[i]->GetIndexInSeries())
       {
         // The current "IndexInSeries" occurs 2 times: Not a proper ordering
-        return false;
+        LOG(WARNING) << "This series contains 2 slices with the same index, trying to display it anyway";
+        break;
       }
     }
 
@@ -398,6 +399,8 @@ namespace Orthanc
 
     result["Dicom"] = tmp;
 
+    Json::Value slicesShort = Json::arrayValue;
+
     tmp.clear();
     for (size_t i = 0; i < GetInstancesCount(); i++)
     {
@@ -406,8 +409,16 @@ namespace Orthanc
       {
         tmp.append(base + "/frames/" + boost::lexical_cast<std::string>(j));
       }
+
+      Json::Value tmp2 = Json::arrayValue;
+      tmp2.append(GetInstanceId(i));
+      tmp2.append(0);
+      tmp2.append(GetFramesCount(i));
+      
+      slicesShort.append(tmp2);
     }
 
     result["Slices"] = tmp;
+    result["SlicesShort"] = slicesShort;
   }
 }
