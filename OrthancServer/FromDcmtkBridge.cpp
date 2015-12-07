@@ -581,7 +581,7 @@ namespace Orthanc
     
     switch (format)
     {
-      case DicomToJsonFormat_Simple:
+      case DicomToJsonFormat_Human:
         parent[tagName] = Json::nullValue;
         return parent[tagName];
 
@@ -628,7 +628,7 @@ namespace Orthanc
     switch (format)
     {
       case DicomToJsonFormat_Short:
-      case DicomToJsonFormat_Simple:
+      case DicomToJsonFormat_Human:
       {
         assert(target.type() == Json::nullValue);
         targetValue = &target;
@@ -877,6 +877,21 @@ namespace Orthanc
     {
       uint16_t group = GetTagValue(name);
       uint16_t element = GetTagValue(name + 5);
+      return DicomTag(group, element);
+    }
+
+    if (strlen(name) == 8 &&
+        isxdigit(name[0]) &&
+        isxdigit(name[1]) &&
+        isxdigit(name[2]) &&
+        isxdigit(name[3]) &&
+        isxdigit(name[4]) &&
+        isxdigit(name[5]) &&
+        isxdigit(name[6]) &&
+        isxdigit(name[7]))        
+    {
+      uint16_t group = GetTagValue(name);
+      uint16_t element = GetTagValue(name + 4);
       return DicomTag(group, element);
     }
 
